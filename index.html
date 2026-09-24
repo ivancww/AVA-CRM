@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#1e3a8a" />
+    <meta name="description" content="AVA-CRM 客戶保障理解與發現" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="stylesheet" href="styles.css" />
+    <title>AVA-CRM · 客戶發現</title>
+  </head>
+  <body class="ava-front">
+    <header class="ava-front__header app-header">
+      <a class="ava-button ava-button--subtle return-link" href="https://avaplatform.app/" aria-label="返回 AVA / Return to AVA">
+        <span aria-hidden="true">←</span> 返回 AVA
+      </a>
+      <div class="brand-lockup"><span class="brand-mark">AVA</span><span>CRM</span><span class="header-context">客戶發現與保障理解</span></div>
+      <div class="header-actions"><span class="storage-pill" id="storageStatus">本機準備中</span><button class="ava-button ava-button--subtle" id="deviceTransferBtn">裝置轉移</button></div>
+      <div class="ava-front__progress"><div class="ava-front__progress-fill" id="progressFill" style="--ava-visual-value: 18%"></div></div>
+    </header>
+
+    <main class="ava-front__container">
+      <section class="hero-grid">
+        <div>
+          <p class="eyebrow">CUSTOMER DISCOVERY · 01</p>
+          <h1 class="ava-front__title">先理解客戶，<br />再談保障。</h1>
+          <p class="ava-front__support">從客戶心中的保障感覺開始，逐步揭示實際保障、未來資源與退休後的醫療選擇。</p>
+          <div class="mode-chip" aria-label="目前模式：Agent 使用模式"><span class="mode-dot"></span> Agent 使用模式</div>
+        </div>
+        <div class="hero-visual" aria-label="保障理解流程視覺摘要">
+          <div class="orbit orbit-a"></div><div class="orbit orbit-b"></div>
+          <div class="hero-number">01<span>/05</span></div>
+          <p>由一個自然問題<br />開始對話</p>
+        </div>
+      </section>
+
+      <section class="ava-card intake-card" aria-labelledby="intake-title">
+        <div class="ava-card__header"><div><p class="eyebrow">AGENT PREPARATION</p><h2 id="intake-title" class="ava-card__title">今天想了解哪一位客戶？</h2><p class="ava-support">資料只會保存在你的 AVA-CRM 本機資料層，不會上傳到官方產品資料表。</p></div><span class="step-badge">開始</span></div>
+        <div class="intake-grid">
+          <label class="ava-field"><span class="ava-label">選擇客戶 / Select customer</span><select id="customerSelect"><option value="">選擇或新增客戶</option><option value="demo">陳小明 · 示範資料</option></select></label>
+          <label class="ava-field"><span class="ava-label">被保人 / Insured person</span><select id="insuredSelect" disabled><option>先選擇客戶</option></select></label>
+        </div>
+        <div class="quick-actions"><button class="ava-button ava-button--primary" id="addCustomerBtn">＋ 新增客戶</button><button class="ava-button ava-button--secondary" id="manualPolicyBtn">手動加入保單</button><button class="ava-button ava-button--secondary" id="aiPolicyBtn">✦ AI 加入保單</button></div>
+        <div class="privacy-note"><span aria-hidden="true">▣</span><span><strong>私隱提示</strong>　PDF / 圖片只作臨時處理，原始檔案不會保存。確認後只保留結構化資料。</span></div>
+      </section>
+
+      <section class="ava-card conversation-card" aria-labelledby="conversation-title">
+        <div class="ava-card__header"><div><p class="eyebrow">NATURAL CONVERSATION</p><h2 id="conversation-title" class="ava-card__title">你覺得自己有咩保障？</h2></div><span class="soft-label">由客戶說起</span></div>
+        <p class="question-support">先記錄客戶的原本感覺，不急著糾正。這會成為之後的對照。</p>
+        <div class="perception-options" role="group" aria-label="客戶保障感覺">
+          <button class="ava-option perception-option" data-perception="幾有信心" aria-pressed="false"><span><strong>幾有信心</strong><small>我應該有足夠保障</small></span><span class="option-arrow">→</span></button>
+          <button class="ava-option perception-option" data-perception="有啲唔肯定" aria-pressed="false"><span><strong>有啲唔肯定</strong><small>有買過，但未必講得清楚</small></span><span class="option-arrow">→</span></button>
+          <button class="ava-option perception-option" data-perception="想重新了解" aria-pressed="false"><span><strong>想重新了解</strong><small>今日想由頭整理一次</small></span><span class="option-arrow">→</span></button>
+        </div>
+        <div class="review-start"><div><strong>準備好開始？</strong><span>用幾分鐘，將「感覺」變成看得明的保障。</span></div><button class="ava-button ava-button--primary" id="startReviewBtn" disabled>開始客戶 Review</button></div>
+      </section>
+
+      <section class="category-section" aria-labelledby="coverage-title">
+        <div class="section-heading"><div><p class="eyebrow">COVERAGE UNDERSTANDING</p><h2 id="coverage-title" class="ava-section-title">保障理解</h2></div><span class="ava-support">先看大方向，再逐層深入</span></div>
+        <div class="category-tabs" role="tablist" aria-label="保障分類">
+          <button role="tab" class="category-tab is-active" aria-selected="true" data-category="medical"><span>醫療</span><small>Medical</small></button>
+          <button role="tab" class="category-tab" aria-selected="false" data-category="critical"><span>危疾</span><small>Critical Illness</small></button>
+          <button role="tab" class="category-tab" aria-selected="false" data-category="life"><span>人壽</span><small>Life</small></button>
+          <button role="tab" class="category-tab" aria-selected="false" data-category="accident"><span>意外</span><small>Accident</small></button>
+        </div>
+        <div class="coverage-panel ava-card" id="coveragePanel"><div><span class="category-icon">✚</span><div><h3 id="coveragePanelTitle">醫療保障</h3><p id="coveragePanelCopy">住院、手術、住院現金與意外醫療會分開呈現，不把不同意義混成一個數字。</p></div></div><div class="coverage-empty"><span class="empty-number">—</span><span>選擇客戶後顯示實際保障</span></div></div>
+      </section>
+
+      <section class="next-step ava-card"><div><p class="eyebrow">NEXT TOPIC</p><h2 class="ava-card__title">客戶想先了解什麼？</h2><p class="ava-support">最後由客戶選擇下一個話題，再前往相關 AVA App。</p></div><div class="topic-pills"><button class="topic-pill">我的醫療保障</button><button class="topic-pill">退休後生活</button><button class="topic-pill">未來資源</button></div></section>
+    </main>
+
+    <footer class="app-footer"><span>AVA-CRM <span id="appVersion">v0.1.0</span> · Local-first</span><span>© AVA Platform</span></footer>
+    <dialog id="modal" class="ava-modal"><div class="modal-content"><button class="modal-close ava-button ava-button--icon" id="modalClose" aria-label="關閉">×</button><div id="modalBody"></div></div></dialog>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
