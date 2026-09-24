@@ -47,6 +47,14 @@ body[data-ava-mode="presentation"] .app-footer #deviceTransferFooter { visibilit
 .category-tab span, .category-tab small { display: block; } .category-tab span { font-size: 17px; font-weight: 700; } .category-tab small { margin-top: 4px; font-size: 11px; }
 .category-tab.is-active { color: var(--ava-color-primary); background: var(--ava-color-selected); border-color: var(--ava-color-secondary); box-shadow: inset 0 -3px var(--ava-color-secondary); }
 .coverage-panel { display: flex; align-items: center; justify-content: space-between; gap: 20px; min-height: 120px; }
+#coveragePanel { align-items: stretch; flex-direction: column; }
+.category-expectation { padding: 12px; background: var(--ava-color-background); border-radius: 10px; }
+.expectation-options { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.benefit-row { display: grid; grid-template-columns: minmax(120px, 1fr) auto; gap: 4px 12px; padding: 10px 0; border-bottom: 1px solid var(--ava-color-border); }
+.benefit-row small { grid-column: 1 / -1; color: var(--ava-color-text-muted); }
+.coverage-total { display: block; margin-top: 8px; color: var(--ava-color-text-secondary); }
+.policy-review-row { display: flex; flex-direction: column; gap: 5px; width: 100%; padding: 14px; color: var(--ava-color-text); text-align: start; background: var(--ava-color-surface); border: 1px solid var(--ava-color-border); border-radius: 10px; cursor: pointer; }
+.policy-review-row span, .policy-review-row small { color: var(--ava-color-text-secondary); }
 .coverage-panel > div:first-child { display: flex; gap: 14px; align-items: flex-start; } .coverage-panel h3 { margin: 0 0 5px; font-size: 17px; } .coverage-panel p { max-width: 540px; margin: 0; color: var(--ava-color-text-secondary); font-size: 14px; }
 .category-icon { display: grid; place-items: center; width: 44px; height: 44px; color: var(--ava-color-secondary); background: var(--ava-color-brand-soft); border-radius: 12px; font-size: 22px; }
 .coverage-empty { display: flex; flex-direction: column; align-items: center; color: var(--ava-color-text-muted); font-size: 12px; white-space: nowrap; } .empty-number { color: var(--ava-color-primary); font-size: 34px; font-weight: 800; }
