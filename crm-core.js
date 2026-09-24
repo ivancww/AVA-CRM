@@ -6,13 +6,32 @@ export const INTAKE_STEPS = ['Upload', 'Document Understanding', 'Policy Groupin
 export const POLICY_COMPARE_FIELDS = ['insurer', 'productName', 'productVersion', 'policyNumber', 'coverageTerm', 'premium', 'paymentTerm', 'paymentFrequency', 'currency', 'status', 'benefits'];
 
 export function normalizeSearchName(value = '') { return String(value).normalize('NFKC').trim().toLocaleLowerCase(); }
-export function createBenefit(input = {}) { return { id: input.id || crypto.randomUUID(), policyId: input.policyId || '', insuredPersonId: input.insuredPersonId || '', primaryCategory: input.primaryCategory || 'medical', benefitCategory: input.benefitCategory || input.primaryCategory || 'medical', presentationTags: input.presentationTags || [], benefitType: input.benefitType || '', amount: input.amount ?? null, limit: input.limit ?? null, unit: input.unit || '', benefitForm: input.benefitForm || '', metadata: input.metadata || {}, createdAt: input.createdAt || new Date().toISOString() }; }
+export function createBenefit(input = {}) { return { id: input.id || crypto.randomUUID(), policyId: input.policyId || '', insuredPersonId: input.insuredPersonId || '', primaryCategory: input.primaryCategory || 'medical', benefitCategory: input.benefitCategory || input.primaryCategory || 'medical', presentationTags: input.presentationTags || [], benefitType: input.benefitType || '', amount: input.amount ?? null, limit: input.limit ?? null, currency: input.currency || '', unit: input.unit || '', benefitForm: input.benefitForm || '', metadata: input.metadata || {}, createdAt: input.createdAt || new Date().toISOString() }; }
 export function dedupeBenefits(benefits) { const unique = new Map(); for (const benefit of benefits) unique.set(benefit.id, benefit); return [...unique.values()]; }
 export function benefitAppearsInCategory(benefit, category) { return benefit.primaryCategory === category || (benefit.presentationTags || []).includes(category) || benefit.benefitCategory === category; }
 export function categoryBenefits(benefits, category) { return dedupeBenefits(benefits.filter((benefit) => benefitAppearsInCategory(benefit, category))); }
-export function coverageTotals(benefits, category) { return categoryBenefits(benefits, category).reduce((total, benefit) => total + (Number.isFinite(Number(benefit.amount)) ? Number(benefit.amount) : 0), 0); }
+export function coverageTotals(benefits, category) {
+  const eligible = categoryBenefits(benefits, category);
+  if (!eligible.length) return null;
+  const aggregations = eligible.map((benefit) => benefit.metadata?.aggregation);
+  const first = aggregations[0];
+  if (!first?.allowed || !first.type || !first.definition || !first.semanticBasis || !eligible[0].currency || !eligible[0].unit || !eligible[0].benefitForm) return null;
+  if (eligible.some((benefit, index) => {
+    const aggregation = aggregations[index];
+    return !aggregation?.allowed || aggregation.type !== first.type || aggregation.definition !== first.definition || aggregation.semanticBasis !== first.semanticBasis || benefit.currency !== eligible[0].currency || benefit.unit !== eligible[0].unit || benefit.benefitForm !== eligible[0].benefitForm;
+  })) return null;
+  const amounts = eligible.map((benefit) => Number(benefit.amount));
+  return amounts.every(Number.isFinite) ? amounts.reduce((total, amount) => total + amount, 0) : null;
+}
 export function comparePolicy(existing = {}, extracted = {}) { return POLICY_COMPARE_FIELDS.filter((field) => JSON.stringify(existing[field] ?? null) !== JSON.stringify(extracted[field] ?? null)).map((field) => ({ field, existing: existing[field] ?? null, extracted: extracted[field] ?? null })); }
-export function matchProduct(products = [], query = {}) { const n = normalizeSearchName; const insurer = n(query.insurer); const product = n(query.productName); const version = n(query.productVersion); const exact = products.find((item) => n(item.insurer) === insurer && n(item.productName) === product && (!version || n(item.productVersion) === version)); if (exact && (!version || n(exact.productVersion) === version)) return { status: 'exact', product: exact, requiresConfirmation: false }; const candidates = products.filter((item) => n(item.insurer) === insurer && product && meaningfulProductSimilarity(n(item.productName), product)); return candidates.length ? { status: 'candidate', candidates, requiresConfirmation: true } : { status: 'none', candidates: [], requiresConfirmation: true }; }
+function hasConfirmedCompatibleVersion(product, version) {
+  const n = normalizeSearchName;
+  if (!version) return false;
+  if (n(product.productVersion) === version) return true;
+  const compatibleVersions = product.compatibleProductVersions || product.productVersionAliases || product.metadata?.compatibleProductVersions || [];
+  return compatibleVersions.some((compatibleVersion) => n(compatibleVersion) === version);
+}
+export function matchProduct(products = [], query = {}) { const n = normalizeSearchName; const insurer = n(query.insurer); const product = n(query.productName); const version = n(query.productVersion); const exact = products.find((item) => n(item.insurer) === insurer && n(item.productName) === product && hasConfirmedCompatibleVersion(item, version)); if (exact) return { status: 'exact', product: exact, requiresConfirmation: false }; const candidates = products.filter((item) => n(item.insurer) === insurer && product && meaningfulProductSimilarity(n(item.productName), product)); return candidates.length ? { status: 'candidate', candidates, requiresConfirmation: true } : { status: 'none', candidates: [], requiresConfirmation: true }; }
 export function meaningfulProductSimilarity(left, right) { if (!left || !right) return false; if (left === right || left.includes(right) || right.includes(left)) return true; const leftTokens = new Set(left.split(/[\s·•丨|，,()（）-]+/).filter(Boolean)); const rightTokens = new Set(right.split(/[\s·•丨|，,()（）-]+/).filter(Boolean)); return [...leftTokens].some((token) => token.length >= 2 && rightTokens.has(token)); }
 export function resolveProductMatch(products = [], extracted = {}) { const result = matchProduct(products, extracted); if (result.status === 'exact') return { ...result, verifiedFeatures: result.product.features || [], customerExplanations: result.product.customerExplanations || [] }; if (result.status === 'candidate') return { ...result, candidateFeatures: [], message: 'Candidate match requires User confirmation.' }; return { ...result, candidateFeatures: extracted.features || [], message: 'No verified registry match; extracted features remain needs_confirmation.' }; }
 export function createDeviceTransferPointer() { return `ava-crm-transfer:${crypto.randomUUID()}`; }
