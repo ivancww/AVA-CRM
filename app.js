@@ -1,78 +1,33 @@
-import { AI_STATES, OFFICIAL_GAS_ENDPOINT, createDeviceTransferPointer, loadOfficialRegistry, openUserDatabase, saveLocal } from './crm-core.js';
+import { AI_STATES, INTAKE_STEPS, OFFICIAL_GAS_ENDPOINT, comparePolicy, createDeviceTransferPointer, exportUserLayer, loadOfficialRegistry, matchProduct, openUserDatabase, queryByIndex, queryIndexPrefix, resolveProductMatch, saveLocal } from './crm-core.js';
 
-const state = { customer: null, perception: '', category: 'medical', db: null };
-const $ = (id) => document.getElementById(id);
-const modal = $('modal');
-let dataFileHandle = null;
-
-function showModal(title, body, action = '') {
-  $('modalBody').innerHTML = `<h2>${title}</h2><p>${body}</p>${action}`;
-  modal.showModal();
-}
-
-function createCustomer() {
-  const name = window.prompt('客戶姓名 / Customer name（只會保存在本機）');
-  if (!name?.trim()) return;
-  state.customer = { id: crypto.randomUUID(), name: name.trim(), createdAt: new Date().toISOString() };
-  const option = new Option(`${state.customer.name} · 本機客戶`, state.customer.id, true, true);
-  $('customerSelect').add(option); $('insuredSelect').disabled = false; $('insuredSelect').innerHTML = `<option value="${state.customer.id}">${state.customer.name}</option>`;
-  $('storageStatus').textContent = '本機已保存';
-  saveLocal(state.db, 'clients', state.customer);
-  requestDataFileLocation();
-}
-
-async function requestDataFileLocation() {
-  if (!window.showSaveFilePicker) {
-    showModal('本機資料已保存', '本機 IndexedDB 已可用。此瀏覽器未提供持久化檔案選擇器，因此 AVA-CRM 不會假裝可以背景寫入資料檔；你可稍後從支援的裝置匯出。');
-    return;
-  }
-  try {
-    dataFileHandle = await window.showSaveFilePicker({ suggestedName: 'ava-crm-data.json', types: [{ description: 'AVA-CRM data', accept: { 'application/json': ['.json'] } }] });
-    const writable = await dataFileHandle.createWritable();
-    await writable.write(JSON.stringify({ schemaVersion: 1, app: 'AVA-CRM', note: 'Customer data remains User Layer data.' }));
-    await writable.close();
-    showModal('資料檔案位置已設定', '之後的本機操作會以 IndexedDB 為即時資料庫；瀏覽器是否能持續背景寫入檔案，會按平台能力處理，不會默認成功。');
-  } catch (error) { if (error?.name !== 'AbortError') showModal('仍可使用本機資料', '你取消了資料檔案位置選擇。資料仍留在本機 IndexedDB，並未上傳；日後可再次設定。'); }
-}
-
-function selectCustomer(event) {
-  const selected = event.target.value;
-  if (!selected) { $('insuredSelect').disabled = true; return; }
-  state.customer = selected === 'demo' ? { id: 'demo', name: '陳小明' } : state.customer;
-  $('insuredSelect').disabled = false; $('insuredSelect').innerHTML = `<option value="${state.customer.id}">${state.customer.name}（本人）</option>`;
-}
-
-function selectPerception(event) {
-  document.querySelectorAll('.perception-option').forEach((button) => { const active = button === event.currentTarget; button.setAttribute('aria-pressed', String(active)); if (active) state.perception = button.dataset.perception; });
-  $('startReviewBtn').disabled = !state.customer || !state.perception;
-}
-
-function selectCategory(event) {
-  const copy = { medical: ['醫療保障', '住院、手術、住院現金與意外醫療會分開呈現，不把不同意義混成一個數字。', '✚'], critical: ['危疾保障', '顯示一次性賠償、持續賠償與多次賠償狀態，讓客戶知道保障何時可以再次發揮作用。', '◇'], life: ['人壽保障', '用客戶聽得明的方式理解身故保障、受保人與保單價值。', '◯'], accident: ['意外保障', '把意外身故、傷殘與意外醫療分開理解，避免與一般醫療重複計算。', '＋'] }[event.currentTarget.dataset.category];
-  state.category = event.currentTarget.dataset.category;
-  document.querySelectorAll('.category-tab').forEach((tab) => { const active = tab === event.currentTarget; tab.classList.toggle('is-active', active); tab.setAttribute('aria-selected', String(active)); });
-  $('coveragePanelTitle').textContent = copy[0]; $('coveragePanelCopy').textContent = copy[1]; document.querySelector('.category-icon').textContent = copy[2];
-}
-
-function startReview() {
-  $('progressFill').style.setProperty('--ava-visual-value', '36%');
-  showModal('Review 已開始', `已記錄「${state.perception}」。下一步可逐一查看 ${state.customer.name} 的實際保障，並保留客戶自己的選擇。`, '<button class="ava-button ava-button--primary" id="modalContinue">繼續了解保障</button>');
-  $('modalContinue').onclick = () => { modal.close(); document.querySelector('.category-section').scrollIntoView({ behavior: 'smooth' }); };
-  saveLocal(state.db, 'reviews', { id: crypto.randomUUID(), customerId: state.customer.id, perception: state.perception, status: 'draft', createdAt: new Date().toISOString() });
-}
-
-function aiIntake() {
-  showModal('AI 加入保單', '上載前請注意：PDF / 圖片只作臨時處理，最多 10 個檔案；原始檔案不會保存，處理完成後會清除。AI 結果必須經你確認，才會成為正式 CRM 資料。', '<label class="ava-button ava-button--secondary" for="policyFiles">選擇 PDF / 圖片</label><input id="policyFiles" type="file" accept="application/pdf,image/*" multiple hidden><p class="ava-support">流程：Upload → Document Understanding → Policy Grouping → Extraction → Matching → Conflict Detection → Human Confirmation</p>');
-  $('policyFiles').onchange = (event) => { if (event.target.files.length > 10) { event.target.value = ''; showModal('檔案數量超過上限', '每批最多 10 個上載項目。'); return; } showModal('等待人手確認', `已暫存 ${event.target.files.length} 個處理項目。狀態：${AI_STATES.join(' → ')}。正式儲存前不會寫入政策資料，臨時原始檔案亦會清除。`); };
-}
-
-function deviceTransfer() { showModal('裝置轉移', 'QR 只會包含安全轉移指標，不會暴露客戶姓名、保單、保障或其他原始資料。正式轉移服務會由 AVA Platform 安全服務驗證。', `<code>${createDeviceTransferPointer()}</code><p class="ava-support">目前狀態：架構預留，尚未連接轉移後端。</p>`); }
-
-$('modalClose').onclick = () => modal.close(); $('addCustomerBtn').onclick = createCustomer; $('customerSelect').onchange = selectCustomer; $('aiPolicyBtn').onclick = aiIntake; $('deviceTransferBtn').onclick = deviceTransfer; $('startReviewBtn').onclick = startReview;
-$('manualPolicyBtn').onclick = () => showModal('手動加入保單', '手動輸入會建立本機草稿，之後仍需確認才會成為正式政策資料。');
-document.querySelectorAll('.perception-option').forEach((button) => button.addEventListener('click', selectPerception)); document.querySelectorAll('.category-tab').forEach((tab) => tab.addEventListener('click', selectCategory));
-
-openUserDatabase().then((db) => { state.db = db; $('storageStatus').textContent = db ? '本機已就緒' : '瀏覽器不支援本機資料庫'; }).catch(() => { $('storageStatus').textContent = '本機資料庫錯誤'; });
-loadOfficialRegistry().then((result) => { document.body.dataset.officialSource = result.source; }).catch(() => { document.body.dataset.officialSource = 'built-in-fallback'; });
+const $ = (id) => document.getElementById(id); const modal = $('modal');
+const state = { db: null, registry: null, households: [], household: null, people: [], insuredPerson: null, perception: '', priority: '', sessionStep: 0, dataFileHandle: null, officialSource: 'built-in-fallback' };
+const steps = ['perception', 'coverage', 'resources', 'retirement', 'reservoirs', 'review', 'presentation'];
+function showModal(title, body, action = '') { $('modalBody').innerHTML = `<h2>${title}</h2><p>${body}</p>${action}`; modal.showModal(); }
+function personRecord(householdId, name, relationship = '本人') { return { id: crypto.randomUUID(), householdId, name, relationship, createdAt: new Date().toISOString() }; }
+function refreshCustomerOptions() { const select = $('customerSelect'); select.innerHTML = state.households.length ? '<option value="">請選擇搜尋結果</option>' : '<option value="">沒有符合的本機客戶</option>'; for (const household of state.households) select.add(new Option(household.displayName, household.id)); const empty = state.households.length === 0; $('customerEmpty').hidden = Boolean($('customerSearch').value) || !empty; $('customerFields').hidden = false; for (const id of ['manualPolicyBtn', 'aiPolicyBtn']) $(id).disabled = !state.household; }
+async function searchHouseholds(event) { const query = event.target.value.trim().toLocaleLowerCase(); state.households = query.length >= 1 ? await queryIndexPrefix(state.db, 'households', 'byDisplayName', query, 50) : []; state.household = null; state.insuredPerson = null; refreshCustomerOptions(); }
+async function loadHouseholds() { state.households = []; $('customerFields').hidden = false; refreshCustomerOptions(); }
+async function addCustomer() { const name = window.prompt('客戶姓名 / Customer name（只會保存在本機）'); if (!name?.trim()) return; const household = { id: crypto.randomUUID(), displayName: name.trim(), createdAt: new Date().toISOString() }; const person = personRecord(household.id, name.trim()); household.primaryPersonId = person.id; await saveLocal(state.db, 'households', household); await saveLocal(state.db, 'people', person); state.households.push(household); refreshCustomerOptions(); $('customerSelect').value = household.id; await selectHousehold({ target: $('customerSelect') }); await requestDataFileLocation(); }
+async function selectHousehold(event) { const id = event.target.value; state.household = state.households.find((item) => item.id === id) || null; state.people = state.household ? await queryByIndex(state.db, 'people', 'byHouseholdId', state.household.id) : []; const insured = $('insuredSelect'); insured.innerHTML = state.people.length ? '<option value="">請選擇被保人</option>' : '<option value="">沒有可選被保人</option>'; state.people.forEach((person) => insured.add(new Option(`${person.name} · ${person.relationship}`, person.id))); insured.disabled = !state.people.length; $('manualPolicyBtn').disabled = !state.household; $('aiPolicyBtn').disabled = !state.household; }
+function selectInsured(event) { state.insuredPerson = state.people.find((person) => person.id === event.target.value) || null; $('startReviewBtn').disabled = !(state.household && state.insuredPerson); }
+async function requestDataFileLocation() { if (state.dataFileHandle || localStorage.getItem('ava-crm-file-location-requested') === 'true') return; localStorage.setItem('ava-crm-file-location-requested', 'true'); if (!window.showSaveFilePicker) { showModal('本機資料已保存', 'IndexedDB 已保存客戶資料。此瀏覽器未提供支援的系統檔案選擇器；持久化資料檔同步：BLOCKED，保留本機安全 fallback。'); return; } try { state.dataFileHandle = await window.showSaveFilePicker({ suggestedName: 'ava-crm-data.json', types: [{ description: 'AVA-CRM data', accept: { 'application/json': ['.json'] } }] }); await syncDataFile(); showModal('資料檔案已設定', '已使用支援的系統檔案選擇器建立 AVA-CRM User Layer 匯出檔。背景持久寫入能力會按平台驗證，不會默認成功。'); } catch (error) { if (error?.name !== 'AbortError') showModal('仍可使用本機資料', '你取消了檔案位置選擇；資料仍在 IndexedDB，未上傳。'); } }
+async function syncDataFile() { if (!state.dataFileHandle) return false; const writable = await state.dataFileHandle.createWritable(); await writable.write(JSON.stringify(await exportUserLayer(state.db), null, 2)); await writable.close(); return true; }
+function startSession() { state.sessionStep = 0; $('agentHome').hidden = true; $('agentHeader').classList.add('session-mode'); $('customerSession').hidden = false; $('sessionTitle').textContent = `${state.insuredPerson.name} 的保障理解`; document.body.dataset.avaMode = 'presentation'; renderStep(); }
+function endSession() { state.sessionStep = 0; state.perception = ''; state.priority = ''; $('customerSession').hidden = true; $('agentHome').hidden = false; $('agentHeader').classList.remove('session-mode'); document.body.dataset.avaMode = 'use'; }
+function renderStep() { document.querySelectorAll('.session-step').forEach((element) => { element.hidden = element.dataset.step !== steps[state.sessionStep]; }); $('sessionProgressFill').style.width = `${((state.sessionStep + 1) / steps.length) * 100}%`; document.querySelector('.session-progress').setAttribute('aria-valuenow', String(state.sessionStep + 1)); if (steps[state.sessionStep] === 'presentation') { $('summaryPerception').textContent = state.perception || '—'; $('summaryPriority').textContent = state.priority || '—'; } }
+function nextStep() { if (state.sessionStep < steps.length - 1) { state.sessionStep += 1; renderStep(); } }
+function previousStep() { if (state.sessionStep > 0) { state.sessionStep -= 1; renderStep(); } }
+function choosePerception(event) { document.querySelectorAll('.perception-option').forEach((button) => button.setAttribute('aria-pressed', String(button === event.currentTarget))); state.perception = event.currentTarget.dataset.perception; $('perceptionNext').disabled = false; }
+function choosePriority(event) { state.priority = event.currentTarget.dataset.value; document.querySelectorAll('.priority-choice').forEach((button) => button.classList.toggle('is-selected', button === event.currentTarget)); }
+function selectCategory(event) { const copy = { medical: ['醫療保障', '按實際 Benefit 資料分開顯示住院醫療、手術保障、住院現金及意外醫療。', '✚'], critical: ['危疾保障', '顯示一次性賠償、持續賠償與多次賠償狀態。', '◇'], life: ['人壽保障', '理解身故保障、受保人與保單價值。', '◯'], accident: ['意外保障', '把意外保障與意外醫療分開理解，避免重複計算。', '＋'] }[event.currentTarget.dataset.category]; document.querySelectorAll('.category-tab').forEach((tab) => { const active = tab === event.currentTarget; tab.classList.toggle('is-active', active); tab.setAttribute('aria-selected', String(active)); }); $('coveragePanelTitle').textContent = copy[0]; $('coveragePanelCopy').textContent = copy[1]; document.querySelector('.category-icon').textContent = copy[2]; }
+async function aiIntake() { showModal('AI 加入保單', '上載前請注意：PDF / 圖片只作今次閱讀，最多 10 個 upload items；原始檔案不會保存。AI 輸出一定先是 draft / needs_confirmation，確認後才可寫入正式 CRM。', '<label class="ava-button ava-button--secondary" for="policyFiles">選擇 PDF / 圖片</label><input id="policyFiles" type="file" accept="application/pdf,image/*" multiple hidden><p class="ava-support">流程：Upload → Document Understanding → Policy Grouping → Policy Extraction → Product Matching → Feature Matching → Coverage Classification → Conflict / Missing Data Detection → Human Confirmation → Save → Delete temporary source</p>'); $('policyFiles').onchange = async (event) => { const files = [...event.target.files]; if (files.length > 10) return showModal('檔案數量超過上限', '每批最多 10 個上載項目。'); const draft = { id: crypto.randomUUID(), householdId: state.household.id, insuredPersonId: state.insuredPerson?.id || '', state: AI_STATES[0], pipeline: INTAKE_STEPS.map((name) => ({ name, status: name === 'Upload' ? 'complete' : 'blocked' })), sourceItems: files.map((file) => ({ name: file.name, type: file.type, size: file.size })), backendStatus: 'BLOCKED', backendMessage: '實際 AI Document Understanding backend 尚未接通；沒有假造 extraction 結果。', createdAt: new Date().toISOString() }; await saveLocal(state.db, 'intakeDrafts', draft); showModal('AI intake 已建立草稿', `狀態：${draft.state} → needs_confirmation → confirmed。Backend extraction：BLOCKED；未寫入 formal policy，臨時原始檔案只存在此次 reading session，已由瀏覽器 file input 釋放。`, '<button class="ava-button ava-button--secondary" id="viewIntakeContract">查看 Intake Contract</button>'); $('viewIntakeContract').onclick = () => showModal('Human Confirmation 必須先發生', '待 backend 可用後，系統會顯示 structured extraction、產品匹配、feature、coverage、missing/conflict 及舊新差異；User 決定後才會儲存 confirmed data。'); }; }
+function manualPolicy() { showModal('手動加入保單', 'Manual policy entry contract：Policy、Policy Roles、Benefits 分開保存；policyholder 與 insured person 可為不同 People。正式保存前仍需確認。'); }
+function deviceTransfer() { showModal('裝置轉移', 'Generate QR Code / Scan QR Code 的 UI contract 已保留，但安全 transfer backend 尚未由 AVA Platform 提供，因此實際 transfer：BLOCKED。QR 絕不放入 raw customer data。', `<div class="transfer-actions"><button class="ava-button ava-button--secondary" id="generateQrBtn">Generate QR Code</button><button class="ava-button ava-button--secondary" id="scanQrBtn">Scan QR Code</button></div><p class="blocked-note">Pointer contract（不含客戶資料）：${createDeviceTransferPointer()}</p>`); $('generateQrBtn').onclick = () => showModal('Generate QR Code · BLOCKED', '待 Mother Platform secure transfer service 接通；目前不產生假 QR。'); $('scanQrBtn').onclick = () => showModal('Scan QR Code · BLOCKED', '待 Mother Platform secure transfer service 接通；目前不讀取未知資料。'); }
+$('modalClose').onclick = () => modal.close(); $('addCustomerBtn').onclick = addCustomer; $('customerSearch').oninput = searchHouseholds; $('customerSelect').onchange = selectHousehold; $('insuredSelect').onchange = selectInsured; $('aiPolicyBtn').onclick = aiIntake; $('manualPolicyBtn').onclick = manualPolicy; $('deviceTransferBtn').onclick = deviceTransfer; $('deviceTransferFooter').onclick = deviceTransfer; $('startReviewBtn').onclick = startSession; $('endSessionBtn').onclick = endSession; $('perceptionNext').onclick = nextStep; $('presentationBack').onclick = () => { state.sessionStep = 5; renderStep(); };
+document.querySelectorAll('.session-next').forEach((button) => button.addEventListener('click', nextStep)); document.querySelectorAll('.session-back').forEach((button) => button.addEventListener('click', previousStep)); document.querySelectorAll('.perception-option').forEach((button) => button.addEventListener('click', choosePerception)); document.querySelectorAll('.priority-choice').forEach((button) => button.addEventListener('click', choosePriority)); document.querySelectorAll('.category-tab').forEach((button) => button.addEventListener('click', selectCategory)); document.querySelectorAll('.retirement-choice').forEach((button) => button.addEventListener('click', (event) => event.currentTarget.classList.toggle('is-selected')));
+openUserDatabase().then(async (db) => { state.db = db; $('storageStatus').textContent = db ? '本機已就緒' : 'IndexedDB：BLOCKED'; await loadHouseholds(); }).catch(() => { $('storageStatus').textContent = 'IndexedDB：BLOCKED'; });
+loadOfficialRegistry().then((result) => { state.registry = result.payload; state.officialSource = result.source; document.body.dataset.officialSource = result.source; }).catch(() => { document.body.dataset.officialSource = 'built-in-fallback'; });
 window.addEventListener('beforeunload', () => state.db?.close());
-console.info('AVA-CRM official configuration endpoint (read-only):', OFFICIAL_GAS_ENDPOINT);
+const officialProductMatchContract = (extracted) => resolveProductMatch(state.registry?.['產品資料'] || [], extracted);
+console.info('AVA-CRM official configuration endpoint (read-only):', OFFICIAL_GAS_ENDPOINT, 'Product matching ready:', typeof matchProduct === 'function', 'registry contract ready:', typeof officialProductMatchContract === 'function', 'compare fields:', comparePolicy({}, {}).length);

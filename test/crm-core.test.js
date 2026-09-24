@@ -1,8 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AI_STATES, comparePolicy, createBenefit, dedupeBenefits, matchProduct } from '../crm-core.js';
+import { AI_STATES, DB_VERSION, POLICY_COMPARE_FIELDS, comparePolicy, createBenefit, dedupeBenefits, matchProduct, resolveProductMatch } from '../crm-core.js';
 
 test('AI intake uses confirmation states', () => assert.deepEqual(AI_STATES, ['draft', 'needs_confirmation', 'confirmed']));
 test('benefits deduplicate by stable unique ID', () => { const first = createBenefit({ id: 'b1', primaryCategory: 'accident', presentationTags: ['accident', 'medical'] }); assert.equal(dedupeBenefits([first, { ...first, amount: 100 }]).length, 1); });
 test('policy comparison returns differences without overwriting', () => assert.deepEqual(comparePolicy({ premium: 100, paymentTerm: '20年' }, { premium: 120, paymentTerm: '20年' }), [{ field: 'premium', existing: 100, extracted: 120 }]));
 test('product match distinguishes exact from candidate', () => { const products = [{ insurer: 'AVA', productName: '安心醫療', productVersion: '2026' }]; assert.equal(matchProduct(products, products[0]).status, 'exact'); assert.equal(matchProduct(products, { insurer: 'AVA', productName: '安心', productVersion: '2025' }).requiresConfirmation, true); });
+test('policy conflict comparison includes structured term and benefits', () => { const differences = comparePolicy({ coverageTerm: '20年', benefits: [{ id: 'b1', amount: 100 }] }, { coverageTerm: '終身', benefits: [{ id: 'b1', amount: 120 }] }); assert.deepEqual(differences.map((item) => item.field), ['coverageTerm', 'benefits']); });
+test('database model has indexed-scale version and required comparison fields', () => { assert.equal(DB_VERSION, 2); assert.ok(POLICY_COMPARE_FIELDS.includes('coverageTerm')); assert.ok(POLICY_COMPARE_FIELDS.includes('benefits')); });
+test('exact official product match carries verified features while fuzzy match requires confirmation', () => { const registry = [{ insurer: 'AVA', productName: '安心醫療', productVersion: '2026', features: ['住院醫療'], customerExplanations: ['住院時可按條款申請'] }]; const exact = resolveProductMatch(registry, registry[0]); assert.deepEqual(exact.verifiedFeatures, ['住院醫療']); const candidate = resolveProductMatch(registry, { insurer: 'AVA', productName: '安心', productVersion: '2025' }); assert.equal(candidate.requiresConfirmation, true); });

@@ -1,63 +1,22 @@
 export const OFFICIAL_GAS_ENDPOINT = 'https://script.google.com/macros/s/AKfycbyvGzKK5v9VEXyTeCmGUKhnVXgO6eh7Hg6FDEfwEIfsd58SCtPdNQvW21wTp9J5FfAX/exec';
 export const DB_NAME = 'ava-crm-user-layer';
-export const DB_VERSION = 1;
+export const DB_VERSION = 2;
 export const AI_STATES = ['draft', 'needs_confirmation', 'confirmed'];
+export const INTAKE_STEPS = ['Upload', 'Document Understanding', 'Policy Grouping', 'Policy Extraction', 'Product Matching', 'Feature Matching', 'Coverage Classification', 'Conflict / Missing Data Detection', 'Human Confirmation', 'Save structured data', 'Delete temporary source'];
+export const POLICY_COMPARE_FIELDS = ['insurer', 'productName', 'productVersion', 'policyNumber', 'coverageTerm', 'premium', 'paymentTerm', 'paymentFrequency', 'currency', 'status', 'benefits'];
 
-export function createBenefit(input = {}) {
-  return { id: input.id || crypto.randomUUID(), policyId: input.policyId || '', primaryCategory: input.primaryCategory || 'medical', presentationTags: input.presentationTags || [], benefitType: input.benefitType || '', amount: input.amount ?? null, limit: input.limit ?? null, unit: input.unit || '', benefitForm: input.benefitForm || '', metadata: input.metadata || {}, createdAt: input.createdAt || new Date().toISOString() };
-}
+export function createBenefit(input = {}) { return { id: input.id || crypto.randomUUID(), policyId: input.policyId || '', primaryCategory: input.primaryCategory || 'medical', benefitCategory: input.benefitCategory || input.primaryCategory || 'medical', presentationTags: input.presentationTags || [], benefitType: input.benefitType || '', amount: input.amount ?? null, limit: input.limit ?? null, unit: input.unit || '', benefitForm: input.benefitForm || '', metadata: input.metadata || {}, createdAt: input.createdAt || new Date().toISOString() }; }
+export function dedupeBenefits(benefits) { const unique = new Map(); for (const benefit of benefits) unique.set(benefit.id, benefit); return [...unique.values()]; }
+export function comparePolicy(existing = {}, extracted = {}) { return POLICY_COMPARE_FIELDS.filter((field) => JSON.stringify(existing[field] ?? null) !== JSON.stringify(extracted[field] ?? null)).map((field) => ({ field, existing: existing[field] ?? null, extracted: extracted[field] ?? null })); }
+export function matchProduct(products = [], query = {}) { const n = (value) => String(value || '').trim().toLocaleLowerCase(); const insurer = n(query.insurer); const product = n(query.productName); const version = n(query.productVersion); const exact = products.find((item) => n(item.insurer) === insurer && n(item.productName) === product && n(item.productVersion) === version); if (exact) return { status: 'exact', product: exact, requiresConfirmation: false }; const candidates = products.filter((item) => n(item.insurer) === insurer || (product && (n(item.productName).includes(product) || product.includes(n(item.productName))))); return candidates.length ? { status: 'candidate', candidates, requiresConfirmation: true } : { status: 'none', candidates: [], requiresConfirmation: true }; }
+export function resolveProductMatch(products = [], extracted = {}) { const result = matchProduct(products, extracted); if (result.status === 'exact') return { ...result, verifiedFeatures: result.product.features || [], customerExplanations: result.product.customerExplanations || [] }; if (result.status === 'candidate') return { ...result, candidateFeatures: [], message: 'Candidate match requires User confirmation.' }; return { ...result, candidateFeatures: extracted.features || [], message: 'No verified registry match; extracted features remain needs_confirmation.' }; }
+export function createDeviceTransferPointer() { return `ava-crm-transfer:${crypto.randomUUID()}`; }
+export function emptyOfficialRegistry() { return { '保障分類': [], '產品資料': [], 'Review問題': [], '頁面設定': [], '系統設定': [] }; }
 
-export function dedupeBenefits(benefits) {
-  const unique = new Map();
-  for (const benefit of benefits) unique.set(benefit.id, benefit);
-  return [...unique.values()];
-}
-
-export function comparePolicy(existing, extracted) {
-  const fields = ['insurer', 'productName', 'productVersion', 'premium', 'paymentTerm'];
-  return fields.filter((field) => String(existing?.[field] ?? '') !== String(extracted?.[field] ?? '')).map((field) => ({ field, existing: existing?.[field] ?? null, extracted: extracted?.[field] ?? null }));
-}
-
-export function matchProduct(products, query) {
-  const normalized = (value) => String(value || '').trim().toLocaleLowerCase();
-  const insurer = normalized(query?.insurer); const product = normalized(query?.productName); const version = normalized(query?.productVersion);
-  const exact = products.find((item) => normalized(item.insurer) === insurer && normalized(item.productName) === product && (!version || normalized(item.productVersion) === version));
-  if (exact) return { status: 'exact', product: exact, requiresConfirmation: false };
-  const candidates = products.filter((item) => normalized(item.insurer) === insurer || normalized(item.productName).includes(product) || product.includes(normalized(item.productName)));
-  return candidates.length ? { status: 'candidate', candidates, requiresConfirmation: true } : { status: 'none', candidates: [], requiresConfirmation: true };
-}
-
-export function createDeviceTransferPointer() {
-  return `ava-crm-transfer:${crypto.randomUUID()}`;
-}
-
-export async function openUserDatabase() {
-  if (!('indexedDB' in globalThis)) return null;
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      for (const store of ['clients', 'people', 'policies', 'benefits', 'reviews', 'intakeDrafts']) if (!db.objectStoreNames.contains(store)) db.createObjectStore(store, { keyPath: 'id' });
-    };
-    request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
-  });
-}
-
-export async function saveLocal(db, storeName, value) {
-  if (!db) return false;
-  return new Promise((resolve, reject) => { const tx = db.transaction(storeName, 'readwrite'); tx.objectStore(storeName).put(value); tx.oncomplete = () => resolve(true); tx.onerror = () => reject(tx.error); });
-}
-
-export async function loadOfficialRegistry(fetchImpl = fetch, storage = localStorage) {
-  const cacheKey = 'ava-crm-official-registry-v1';
-  try {
-    const response = await fetchImpl(OFFICIAL_GAS_ENDPOINT, { headers: { Accept: 'application/json' } });
-    if (!response.ok) throw new Error(`Official registry request failed: ${response.status}`);
-    const payload = await response.json();
-    storage.setItem(cacheKey, JSON.stringify({ savedAt: new Date().toISOString(), payload }));
-    return { source: 'official', payload };
-  } catch {
-    try { const cached = JSON.parse(storage.getItem(cacheKey) || 'null'); if (cached?.payload) return { source: 'official-cache', payload: cached.payload }; } catch { /* safe fallback below */ }
-    return { source: 'built-in-fallback', payload: { '保障分類': [], '產品資料': [], 'Review問題': [], '頁面設定': [], '系統設定': [] } };
-  }
-}
+const STORE_DEFINITIONS = { households: [['byCreatedAt', 'createdAt'], ['byDisplayName', 'displayName']], people: [['byHouseholdId', 'householdId']], policies: [['byHouseholdId', 'householdId'], ['byPolicyHolderId', 'policyHolderId']], policyRoles: [['byPolicyId', 'policyId'], ['byPersonId', 'personId'], ['byPolicyHolderId', 'policyHolderId'], ['byInsuredPersonId', 'insuredPersonId']], benefits: [['byPolicyId', 'policyId'], ['byPrimaryCategory', 'primaryCategory'], ['byBenefitCategory', 'benefitCategory'], ['byInsuredPersonId', 'insuredPersonId']], reviews: [['byHouseholdId', 'householdId'], ['byInsuredPersonId', 'insuredPersonId']], intakeDrafts: [['byHouseholdId', 'householdId'], ['byStatus', 'status']], settings: [['byKey', 'key']] };
+export async function openUserDatabase() { if (!('indexedDB' in globalThis)) return null; return new Promise((resolve, reject) => { const request = indexedDB.open(DB_NAME, DB_VERSION); request.onupgradeneeded = () => { const db = request.result; for (const [storeName, indexes] of Object.entries(STORE_DEFINITIONS)) { const store = db.objectStoreNames.contains(storeName) ? request.transaction.objectStore(storeName) : db.createObjectStore(storeName, { keyPath: 'id' }); for (const [name, keyPath] of indexes) if (!store.indexNames.contains(name)) store.createIndex(name, keyPath, { unique: false }); } }; request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); }
+export async function saveLocal(db, storeName, value) { if (!db) return false; return new Promise((resolve, reject) => { const tx = db.transaction(storeName, 'readwrite'); tx.objectStore(storeName).put(value); tx.oncomplete = () => resolve(true); tx.onerror = () => reject(tx.error); }); }
+export async function queryByIndex(db, storeName, indexName, value) { if (!db) return []; return new Promise((resolve, reject) => { const tx = db.transaction(storeName, 'readonly'); const request = tx.objectStore(storeName).index(indexName).getAll(IDBKeyRange.only(value)); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); }
+export async function queryIndexPrefix(db, storeName, indexName, prefix, limit = 50) { if (!db) return []; return new Promise((resolve, reject) => { const output = []; const tx = db.transaction(storeName, 'readonly'); const index = tx.objectStore(storeName).index(indexName); const range = IDBKeyRange.bound(prefix, `${prefix}\uffff`); const request = index.openCursor(range); request.onsuccess = () => { const cursor = request.result; if (!cursor || output.length >= limit) return resolve(output); output.push(cursor.value); cursor.continue(); }; request.onerror = () => reject(request.error); }); }
+export async function exportUserLayer(db) { if (!db) return null; const data = {}; for (const storeName of Object.keys(STORE_DEFINITIONS)) data[storeName] = await new Promise((resolve, reject) => { const request = db.transaction(storeName, 'readonly').objectStore(storeName).getAll(); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); return { app: 'AVA-CRM', schemaVersion: DB_VERSION, exportedAt: new Date().toISOString(), data }; }
+export async function loadOfficialRegistry(fetchImpl = fetch, storage = localStorage) { const cacheKey = 'ava-crm-official-registry-v2'; try { const response = await fetchImpl(OFFICIAL_GAS_ENDPOINT, { headers: { Accept: 'application/json' } }); if (!response.ok) throw new Error(`Official registry request failed: ${response.status}`); const payload = await response.json(); storage.setItem(cacheKey, JSON.stringify({ savedAt: new Date().toISOString(), payload })); return { source: 'official', payload }; } catch { try { const cached = JSON.parse(storage.getItem(cacheKey) || 'null'); if (cached?.payload) return { source: 'official-cache', payload: cached.payload }; } catch { /* fallback remains safe */ } return { source: 'built-in-fallback', payload: emptyOfficialRegistry() }; } }
