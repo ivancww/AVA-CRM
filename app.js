@@ -1,4 +1,5 @@
 import { AI_STATES, INTAKE_STEPS, OFFICIAL_GAS_ENDPOINT, benefitAppearsInCategory, categoryBenefits, comparePolicy, createDeviceTransferPointer, coverageTotals, exportUserLayer, loadInsuredPersonData, loadOfficialRegistry, matchProduct, normalizeSearchName, openUserDatabase, queryByIndex, queryIndexPrefix, resolveProductMatch, saveUserLayerMutation } from './crm-core.js';
+import { registerAppShellUpdate } from './app-shell.js';
 
 const $ = (id) => document.getElementById(id); const modal = $('modal');
 const state = { db: null, registry: null, households: [], household: null, people: [], insuredPerson: null, selectedData: { roles: [], policies: [], benefits: [], values: [] }, perception: '', activeCategory: 'medical', categoryPerceptions: {}, priority: '', sessionStep: 0, dataFileHandle: null, fileSync: 'pending', officialSource: 'built-in-fallback' };
@@ -40,5 +41,6 @@ document.querySelectorAll('.session-next').forEach((button) => button.addEventLi
 loadAppVersion();
 openUserDatabase().then(async (db) => { state.db = db; setStorageStatus(db ? '本機已就緒' : 'IndexedDB：BLOCKED'); await loadHouseholds(); }).catch(() => { setStorageStatus('IndexedDB：BLOCKED'); });
 loadOfficialRegistry().then((result) => { state.registry = result.payload; state.officialSource = result.source; document.body.dataset.officialSource = result.source; }).catch(() => { document.body.dataset.officialSource = 'built-in-fallback'; });
+registerAppShellUpdate().catch((error) => console.warn('[AVA-CRM] App Shell update check failed; continuing launch:', error));
 window.addEventListener('beforeunload', () => state.db?.close());
 console.info('AVA-CRM official configuration endpoint (read-only):', OFFICIAL_GAS_ENDPOINT, 'Product matching ready:', typeof matchProduct === 'function');
