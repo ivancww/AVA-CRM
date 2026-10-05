@@ -24,7 +24,7 @@ The grant is transport data, not a CRM login. A future browser client must keep 
 - `replaceProductDefinitions` → `產品資料`
 - `replaceSystemSettings` → `系統設定`
 
-The request cannot choose a sheet, range, or spreadsheet. Payload fields are checked against the existing first-row headers of the mapped sheet. Product Feature Registry records remain part of the verified `產品資料` area; AI/customer policy data is not accepted by this API.
+The request cannot choose a sheet, range, or spreadsheet. Payload fields are checked against the existing first-row headers of the mapped sheet. Before replacement, the backend fails closed if the target has sheet/range protection, active filters, merged cells, hidden rows/columns, or formulas. Product Feature Registry records remain part of the verified `產品資料` area; AI/customer policy data is not accepted by this API. Live deployment still requires an authorized operator to verify the real tabs and headers.
 
 ## Deployment requirements
 

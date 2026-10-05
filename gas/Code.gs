@@ -74,6 +74,7 @@ function replaceOfficialArea_(body) {
   try {
     const sheet = sheet_(sheetName);
     const headers = headers_(sheet);
+    assertSheetSafeForReplacement_(sheet, headers.length);
     sheet.clearContents();
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     if (rows.length) sheet.getRange(2, 1, rows.length, headers.length).setValues(rows.map(row => headers.map(header => row[header] ?? '')));
@@ -137,6 +138,17 @@ function headers_(sheet) {
   const lastColumn = sheet.getLastColumn();
   if (!lastColumn) throw new Error('Official sheet has no header');
   return sheet.getRange(1, 1, 1, lastColumn).getValues()[0].map(String);
+}
+
+function assertSheetSafeForReplacement_(sheet, columnCount) {
+  if (sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET).some(protection => protection.isProtected())) throw new Error(`Official sheet is protected: ${sheet.getName()}`);
+  if (sheet.getProtections(SpreadsheetApp.ProtectionType.RANGE).some(protection => protection.isProtected())) throw new Error(`Official sheet has protected ranges: ${sheet.getName()}`);
+  if (sheet.getFilter()) throw new Error(`Official sheet has an active filter: ${sheet.getName()}`);
+  if (sheet.getDataRange().getMergedRanges().length) throw new Error(`Official sheet has merged cells: ${sheet.getName()}`);
+  for (let column = 1; column <= columnCount; column += 1) if (sheet.isColumnHiddenByUser(column)) throw new Error(`Official sheet has hidden columns: ${sheet.getName()}`);
+  for (let row = 1; row <= Math.max(sheet.getLastRow(), 1); row += 1) if (sheet.isRowHiddenByUser(row)) throw new Error(`Official sheet has hidden rows: ${sheet.getName()}`);
+  const formulas = sheet.getDataRange().getFormulas();
+  if (formulas.some(row => row.some(Boolean))) throw new Error(`Official sheet contains formulas: ${sheet.getName()}`);
 }
 
 function rows_(sheet) {

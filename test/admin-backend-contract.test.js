@@ -20,6 +20,11 @@ test('CRM backend has a fixed Official operation allowlist', () => {
   assert.match(source, /Official row schema mismatch/);
   assert.match(source, /Unsupported Official value/);
   assert.match(source, /value\.startsWith\('='\)/);
+  assert.match(source, /assertSheetSafeForReplacement_/);
+  assert.match(source, /getProtections/);
+  assert.match(source, /getMergedRanges/);
+  assert.match(source, /isColumnHiddenByUser/);
+  assert.match(source, /getFormulas/);
 });
 
 test('CRM backend does not contain private CRM/User data targets or frontend secrets', () => {
