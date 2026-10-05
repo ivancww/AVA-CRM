@@ -70,7 +70,7 @@ test('direct and Platform-style launches use the CRM-owned scope and force a wor
   const body = registrationSource.replace(/^export /gm, '');
   vm.runInNewContext(`${body}\nregisterAppShellUpdate({ navigatorObject: navigator, windowObject: window });`, context);
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.deepEqual(calls, [
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
     { script: './sw.js', options: { scope: './', updateViaCache: 'none' } },
     { update: true }
   ]);
