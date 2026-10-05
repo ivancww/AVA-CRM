@@ -1,7 +1,7 @@
 export const AVA_PLATFORM_URL = 'https://ivancww.github.io/avaplatform/';
 export const CRM_CAPABILITIES = Object.freeze({ frontend: true, user: true, admin: false });
 
-const SUPPORTED_ENTRIES = new Set(['frontend', 'user']);
+const SUPPORTED_ENTRIES = new Set(['frontend', 'user', 'admin']);
 
 export function resolveAvaEntry(search = '') {
   const requested = new URLSearchParams(search).get('avaEntry');

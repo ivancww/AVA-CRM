@@ -10,7 +10,7 @@ test('bare and frontend entry resolve to the real CRM Frontstage', () => {
 
 test('user entry reuses the Frontstage and unsupported entries fail safely', () => {
   assert.equal(resolveAvaEntry('?avaEntry=user'), 'user');
-  assert.equal(resolveAvaEntry('?avaEntry=admin'), 'frontend');
+  assert.equal(resolveAvaEntry('?avaEntry=admin'), 'admin');
   assert.equal(resolveAvaEntry('?avaEntry=unknown'), 'frontend');
   assert.deepEqual(CRM_CAPABILITIES, { frontend: true, user: true, admin: false });
 });
