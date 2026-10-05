@@ -1,7 +1,6 @@
 import { AI_STATES, INTAKE_STEPS, OFFICIAL_GAS_ENDPOINT, benefitAppearsInCategory, categoryBenefits, comparePolicy, createDeviceTransferPointer, coverageTotals, exportUserLayer, getById, loadInsuredPersonData, loadOfficialRegistry, matchProduct, normalizeSearchName, openUserDatabase, queryByIndex, queryIndexPrefix, resolveProductMatch, saveUserLayerMutation } from './crm-core.js';
 import { registerAppShellUpdate } from './app-shell.js';
 import { CRM_CAPABILITIES, resolveAvaEntry, returnToAvaUrl } from './ava-entry.js';
-import { initializeAdmin } from './admin-ui.js';
 
 const $ = (id) => document.getElementById(id); const modal = $('modal');
 const state = { db: null, registry: null, households: [], household: null, people: [], insuredPerson: null, selectedData: { roles: [], policies: [], benefits: [], values: [] }, perception: '', activeCategory: 'medical', categoryPerceptions: {}, priority: '', sessionStep: 0, dataFileHandle: null, fileSync: 'pending', officialSource: 'built-in-fallback' };
@@ -45,21 +44,12 @@ async function aiIntake() { const registryProducts = state.registry?.['產品資
 function manualPolicy() { showModal('手動加入保單', 'Manual policy entry contract：Policy、Policy Roles、Benefits 分開保存；policyholder 與 insured person 可為不同 People。正式保存前仍需確認。'); }
 function deviceTransfer() { showModal('裝置轉移', 'Generate QR Code / Scan QR Code 的 UI contract 已保留，但安全 transfer backend 尚未由 AVA Platform 提供，因此實際 transfer：BLOCKED。QR 絕不放入 raw customer data。', `<div class="transfer-actions"><button class="ava-button ava-button--secondary" id="generateQrBtn">Generate QR Code</button><button class="ava-button ava-button--secondary" id="scanQrBtn">Scan QR Code</button></div><p class="blocked-note">Pointer contract（不含客戶資料）：${createDeviceTransferPointer()}</p>`); $('generateQrBtn').onclick = () => showModal('Generate QR Code · BLOCKED', '待 Mother Platform secure transfer service 接通；目前不產生假 QR。'); $('scanQrBtn').onclick = () => showModal('Scan QR Code · BLOCKED', '待 Mother Platform secure transfer service 接通；目前不讀取未知資料。'); }
 
-if (entryMode === 'admin') {
-  document.body.dataset.avaEntry = 'admin';
-  document.body.dataset.crmCapabilities = JSON.stringify(CRM_CAPABILITIES);
-  loadAppVersion();
-  initializeAdmin().then(async (result) => {
-    if (!result.authorized) console.info('[AVA-CRM] Admin entry failed closed:', result.reason);
-  }).catch((error) => console.warn('[AVA-CRM] Admin launch failed closed:', error));
-} else {
-  $('modalClose').onclick = () => modal.close(); $('addCustomerBtn').onclick = addCustomer; $('customerSearch').oninput = searchHouseholds; $('customerSelect').onchange = selectHousehold; $('insuredSelect').onchange = selectInsured; $('aiPolicyBtn').onclick = aiIntake; $('manualPolicyBtn').onclick = manualPolicy; $('deviceTransferFooter').onclick = deviceTransfer; $('fileReconnectBtn').onclick = requestDataFileLocation; $('startReviewBtn').onclick = startSession; $('sessionBackControl').onclick = () => state.sessionStep === 0 ? endSession() : previousStep(); $('editFrontstageBtn').onclick = enterUserEditMode; $('previewFrontstageBtn').onclick = () => setFrontstageMode('preview'); $('saveFrontstageBtn').onclick = saveFrontstage; $('cancelFrontstageBtn').onclick = () => { setFrontstageMode('use'); $('userModeBar').hidden = true; };
-  document.querySelectorAll('.session-next').forEach((button) => button.addEventListener('click', nextStep)); document.querySelectorAll('.perception-option').forEach((button) => button.addEventListener('click', choosePerception)); document.querySelectorAll('.priority-choice').forEach((button) => button.addEventListener('click', choosePriority)); document.querySelectorAll('.category-tab').forEach((button) => button.addEventListener('click', selectCategory)); document.querySelectorAll('.retirement-choice').forEach((button) => button.addEventListener('click', chooseRetirement));
-  loadAppVersion();
-  openUserDatabase().then(async (db) => { state.db = db; setStorageStatus(db ? '本機已就緒' : 'IndexedDB：BLOCKED'); await loadFrontstageOverrides(); await loadHouseholds(); if (entryMode === 'user') enterUserEditMode(); }).catch(() => { setStorageStatus('IndexedDB：BLOCKED'); if (entryMode === 'user') enterUserEditMode(); });
-  loadOfficialRegistry().then((result) => { state.registry = result.payload; state.officialSource = result.source; document.body.dataset.officialSource = result.source; }).catch(() => { document.body.dataset.officialSource = 'built-in-fallback'; });
-  registerAppShellUpdate().catch((error) => console.warn('[AVA-CRM] App Shell update check failed; continuing launch:', error));
-  window.addEventListener('beforeunload', () => state.db?.close());
-  console.info('AVA-CRM official configuration endpoint (read-only):', OFFICIAL_GAS_ENDPOINT, 'Product matching ready:', typeof matchProduct === 'function');
-  document.body.dataset.avaEntry = entryMode; document.body.dataset.crmCapabilities = JSON.stringify(CRM_CAPABILITIES); $('returnAvaLink').href = returnToAvaUrl(entryMode); $('editFrontstageBtn').hidden = entryMode !== 'user';
-}
+$('modalClose').onclick = () => modal.close(); $('addCustomerBtn').onclick = addCustomer; $('customerSearch').oninput = searchHouseholds; $('customerSelect').onchange = selectHousehold; $('insuredSelect').onchange = selectInsured; $('aiPolicyBtn').onclick = aiIntake; $('manualPolicyBtn').onclick = manualPolicy; $('deviceTransferFooter').onclick = deviceTransfer; $('fileReconnectBtn').onclick = requestDataFileLocation; $('startReviewBtn').onclick = startSession; $('sessionBackControl').onclick = () => state.sessionStep === 0 ? endSession() : previousStep(); $('editFrontstageBtn').onclick = enterUserEditMode; $('previewFrontstageBtn').onclick = () => setFrontstageMode('preview'); $('saveFrontstageBtn').onclick = saveFrontstage; $('cancelFrontstageBtn').onclick = () => { setFrontstageMode('use'); $('userModeBar').hidden = true; };
+document.querySelectorAll('.session-next').forEach((button) => button.addEventListener('click', nextStep)); document.querySelectorAll('.perception-option').forEach((button) => button.addEventListener('click', choosePerception)); document.querySelectorAll('.priority-choice').forEach((button) => button.addEventListener('click', choosePriority)); document.querySelectorAll('.category-tab').forEach((button) => button.addEventListener('click', selectCategory)); document.querySelectorAll('.retirement-choice').forEach((button) => button.addEventListener('click', chooseRetirement));
+loadAppVersion();
+openUserDatabase().then(async (db) => { state.db = db; setStorageStatus(db ? '本機已就緒' : 'IndexedDB：BLOCKED'); await loadFrontstageOverrides(); await loadHouseholds(); if (entryMode === 'user') enterUserEditMode(); }).catch(() => { setStorageStatus('IndexedDB：BLOCKED'); if (entryMode === 'user') enterUserEditMode(); });
+loadOfficialRegistry().then((result) => { state.registry = result.payload; state.officialSource = result.source; document.body.dataset.officialSource = result.source; }).catch(() => { document.body.dataset.officialSource = 'built-in-fallback'; });
+registerAppShellUpdate().catch((error) => console.warn('[AVA-CRM] App Shell update check failed; continuing launch:', error));
+window.addEventListener('beforeunload', () => state.db?.close());
+console.info('AVA-CRM official configuration endpoint (read-only):', OFFICIAL_GAS_ENDPOINT, 'Product matching ready:', typeof matchProduct === 'function');
+document.body.dataset.avaEntry = entryMode; document.body.dataset.crmCapabilities = JSON.stringify(CRM_CAPABILITIES); $('returnAvaLink').href = returnToAvaUrl(entryMode); $('editFrontstageBtn').hidden = entryMode !== 'user';
