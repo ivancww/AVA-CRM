@@ -1,13 +1,17 @@
-@import url('/design-system.css');
+@import url('./design-system.css');
 
 * { box-sizing: border-box; }
 body { margin: 0; }
 .app-header { color: var(--ava-color-text); }
+body[data-ava-mode="edit"] [data-user-editable="true"] { outline: 2px dashed var(--ava-color-secondary); outline-offset: 4px; cursor: text; }
+body[data-ava-mode="preview"] [data-user-editable="true"] { outline: 2px solid var(--ava-color-success); outline-offset: 4px; }
+.mode-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 20px; padding: 12px 16px; color: var(--ava-color-primary); background: var(--ava-color-brand-soft); border: 1px solid var(--ava-color-secondary); border-radius: 12px; }
+.mode-bar__actions { display: flex; flex-wrap: wrap; gap: 8px; }
 body[data-ava-mode="presentation"] .app-footer #deviceTransferFooter { visibility: hidden; pointer-events: none; }
-.brand-lockup { display: grid; grid-template-columns: max-content max-content; align-items: baseline; column-gap: 8px; min-width: 0; font-weight: 800; letter-spacing: .04em; }
+.brand-lockup { display: grid; grid-template-columns: max-content max-content max-content; align-items: baseline; column-gap: 8px; min-width: 0; font-weight: 800; letter-spacing: .04em; }
 .brand-mark { color: var(--ava-color-primary); font-size: 20px; }
 .brand-name { font-size: 20px; }
-.app-version { grid-column: 1 / -1; color: var(--ava-color-text-muted); font-size: 12px; font-weight: 500; letter-spacing: 0; line-height: 1.3; }
+.app-version { color: var(--ava-color-text-muted); font-size: 12px; font-weight: 500; letter-spacing: 0; line-height: 1.3; }
 .header-actions { display: flex; align-items: center; gap: 8px; }
 .storage-pill, .soft-label, .mode-chip, .step-badge { border-radius: 999px; padding: 6px 10px; font-size: 12px; white-space: nowrap; }
 .storage-pill { color: var(--ava-color-success-text); background: var(--ava-color-success-soft); }

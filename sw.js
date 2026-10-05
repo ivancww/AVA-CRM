@@ -7,6 +7,7 @@ const APP_SHELL = [
   './',
   './index.html',
   './app.js',
+  './ava-entry.js',
   './crm-core.js',
   './styles.css',
   './design-system.css',
