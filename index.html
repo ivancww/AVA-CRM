@@ -8,14 +8,15 @@
   <body class="ava-front" data-ava-mode="use">
     <header class="ava-front__header app-header" id="agentHeader">
       <div class="brand-lockup"><span class="brand-mark">AVA</span><span class="brand-name">CRM</span><span class="app-version" id="appVersion" aria-label="App version">v—</span></div>
-      <a class="ava-button ava-button--secondary return-link" href="https://avaplatform.app/" aria-label="返回 AVA / Return to AVA"><span aria-hidden="true">←</span> 返回 AVA</a>
+      <div class="header-actions"><button class="ava-button ava-button--secondary" id="editFrontstageBtn" type="button" hidden>編輯 Frontstage</button><a class="ava-button ava-button--secondary return-link" id="returnAvaLink" href="https://ivancww.github.io/avaplatform/" aria-label="返回 AVA / Return to AVA"><span aria-hidden="true">←</span> 返回 AVA</a></div>
     </header>
 
     <main class="ava-front__container">
       <section id="agentHome" aria-labelledby="homeTitle">
-        <div class="page-topic"><h1 id="homeTitle" class="ava-front__title">準備一次更好的客戶對話。</h1></div>
+        <div id="userModeBar" class="mode-bar" hidden><strong id="userModeLabel">我的流程 · Edit Mode</strong><div class="mode-bar__actions"><button class="ava-button ava-button--secondary" id="previewFrontstageBtn" type="button">Preview</button><button class="ava-button ava-button--primary" id="saveFrontstageBtn" type="button">Save Local</button><button class="ava-button ava-button--subtle" id="cancelFrontstageBtn" type="button">取消</button></div></div>
+        <div class="page-topic"><h1 id="homeTitle" class="ava-front__title" data-user-editable="true">準備一次更好的客戶對話。</h1></div>
         <section class="ava-card intake-card" aria-labelledby="intake-title">
-          <div class="ava-card__header"><div><h2 id="intake-title" class="ava-card__title">選擇今天要準備的客戶</h2><p class="ava-support">客戶、家庭成員、保單及保障資料均屬本機私人資料，不會寫入官方 Google Sheet。</p></div><span class="step-badge">只限 Agent</span></div>
+          <div class="ava-card__header"><div><h2 id="intake-title" class="ava-card__title" data-user-editable="true">選擇今天要準備的客戶</h2><p class="ava-support">客戶、家庭成員、保單及保障資料均屬本機私人資料，不會寫入官方 Google Sheet。</p></div><span class="step-badge">只限 Agent</span></div>
           <div id="customerEmpty" class="empty-state"><strong>尚未有本機客戶</strong><span>新增第一位客戶後，才可以選擇被保人並開始 Review。</span></div>
           <div id="customerFields" class="intake-grid" hidden><label class="ava-field"><span class="ava-label">搜尋客戶 / Policyholder</span><input id="customerSearch" type="search" autocomplete="off" placeholder="輸入姓名搜尋本機資料" /><select id="customerSelect"><option value="">請先搜尋客戶</option></select></label><label class="ava-field"><span class="ava-label">選擇被保人 / Insured person</span><select id="insuredSelect" disabled><option value="">先選擇客戶</option></select></label></div>
           <div class="quick-actions"><button class="ava-button ava-button--primary" id="addCustomerBtn">＋ 新增客戶</button><button class="ava-button ava-button--secondary" id="manualPolicyBtn" disabled>手動加入保單</button><button class="ava-button ava-button--secondary" id="aiPolicyBtn" disabled>✦ AI 加入保單</button><button class="ava-button ava-button--primary" id="startReviewBtn" disabled>開始 Customer Review</button></div>
@@ -34,7 +35,7 @@
         <section class="session-step ava-card presentation-card" data-step="presentation" hidden><p class="eyebrow">今日理解</p><h2 class="ava-card__title">把今日的理解帶走</h2><div class="presentation-summary"><div class="summary-item"><span>你原本的感覺</span><strong id="summaryPerception">—</strong></div><div class="summary-item"><span>實際保障理解</span><strong>按類別逐步了解</strong></div><div class="summary-item"><span>未來資源</span><strong>看累積，不急於決定</strong></div><div class="summary-item"><span>資源優先次序</span><strong id="summaryPriority">—</strong></div></div><h3>你想下一步了解什麼？</h3><div class="topic-pills"><button class="topic-pill" data-route="medical">我的醫療保障</button><button class="topic-pill" data-route="retirement">退休後生活</button><button class="topic-pill" data-route="saving">未來資源</button></div><p class="blocked-note">AVA module routing：BLOCKED，待 AVA Platform 提供安全、實際的 Independent App route。</p></section>
       </section>
     </main>
-    <footer class="app-footer"><div><button class="ava-button ava-button--subtle" id="deviceTransferFooter">裝置轉移</button><button class="ava-button ava-button--subtle" id="fileReconnectBtn">連接資料檔</button></div></footer>
+    <footer class="app-footer"><div><button class="ava-button ava-button--subtle" id="deviceTransferFooter">裝置轉移</button><button class="ava-button ava-button--subtle" id="fileReconnectBtn">連接資料檔</button></div><span id="storageStatus" aria-live="polite">本機資料狀態</span></footer>
     <dialog id="modal" class="ava-modal"><div class="modal-content"><button class="modal-close ava-button ava-button--icon" id="modalClose" aria-label="關閉">×</button><div id="modalBody"></div></div></dialog>
     <script type="module" src="app.js"></script>
   </body>
