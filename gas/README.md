@@ -34,6 +34,7 @@ These are deployment requirements, not proof of deployment:
 |---|---|---|---|---|
 | Spreadsheet binding | GAS project | Existing CRM Official Sheet | CRM owner | Supplies the five existing Official tabs |
 | Web App deployment | GAS Deploy | CRM-owned Web App, execute as owner | CRM owner | Serves this source cross-origin |
+| CRM backend URL | Deployment output / future Admin client configuration | The HTTPS `/exec` URL of this deployment | CRM owner | Routes ticket exchange and Official writes to this backend |
 | `CRM_APP_ID` | `gas/Code.gs` | `crm` | Repository + Platform owner | Matches the canonical Platform registry ID |
 | `PLATFORM_ADMIN_ENDPOINT` | `gas/Code.gs` | Current AVA Platform Admin GAS endpoint | Repository owner | Ticket exchange and grant verification |
 | `AVA_ADMIN_APP_IDS` | AVA Platform GAS Script Properties | Must include `crm` | Platform owner | Allows Platform to issue CRM tickets |
