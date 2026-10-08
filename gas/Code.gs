@@ -51,7 +51,11 @@ function parseBody_(event) {
   if (!event || !event.postData || typeof event.postData.contents !== 'string') throw new Error('Request body is required');
   let body;
   try { body = JSON.parse(event.postData.contents); } catch (_) { throw new Error('Malformed JSON body'); }
-  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('JSON object isfunction exchangeAdminSession_(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('JSON object is required');
+  }
+}
+
+function exchangeAdminSession_(body) {
   ['launchTicket','launchNonce','browserProof','appId'].forEach(key => requireText_(body[key], key, 200));
   if (body.appId !== CRM_APP_ID) throw new Error('Invalid App ID');
   const response = platformRequest_({ action: 'exchangeAdminSession', launchTicket: body.launchTicket, launchNonce: body.launchNonce, browserProof: body.browserProof, appId: CRM_APP_ID });
@@ -82,10 +86,6 @@ function verifyAdminSession_(proof, operation) {
   const response = platformRequest_({ action: 'verifyAdminSession', adminSessionProof: proof, appId: CRM_APP_ID, operation });
   const expiry = Date.parse(String(response.expiresAt || ''));
   if (response.success !== true || response.appId !== CRM_APP_ID || response.operation !== operation || response.contract !== 'ava-admin-session-v1' || !Number.isFinite(expiry) || expiry <= Date.now()) throw new Error('Invalid or expired CRM Admin session');
-  return response;
-}
-
-pired');
   return response;
 }
 
