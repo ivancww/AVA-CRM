@@ -33,13 +33,13 @@ function json_(value) {
 }
 
 function doGet() {
-  return json_({ success: true, data: readOfficialRegistry_() });
+  return json_({ success: true, data: readOfficialRegistry_(), revision: officialRevision_() });
 }
 
 function doPost(event) {
   try {
     const body = parseBody_(event);
-    if (body.action === 'exchangeAppLaunch') return json_(exchangeAppLaunch_(body.launchTicket));
+    if (body.action === 'exchangeAdminSession') return json_(exchangeAdminSession_(body));
     if (body.action === 'replaceOfficialArea') return json_(replaceOfficialArea_(body));
     return json_({ success: false, error: 'Unsupported CRM Admin action' });
   } catch (error) {
@@ -51,45 +51,41 @@ function parseBody_(event) {
   if (!event || !event.postData || typeof event.postData.contents !== 'string') throw new Error('Request body is required');
   let body;
   try { body = JSON.parse(event.postData.contents); } catch (_) { throw new Error('Malformed JSON body'); }
-  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('JSON object is required');
-  return body;
-}
-
-function exchangeAppLaunch_(launchTicket) {
-  const ticket = requireText_(launchTicket, 'launchTicket', 200);
-  const response = platformRequest_({ action: 'exchangeAppLaunch', launchTicket: ticket, appId: CRM_APP_ID });
-  if (response.success !== true || !response.appGrant || !response.expiresAt) throw new Error('CRM Admin launch was not authorized');
-  return { success: true, appGrant: String(response.appGrant), expiresAt: String(response.expiresAt) };
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('JSON object isfunction exchangeAdminSession_(body) {
+  ['launchTicket','launchNonce','browserProof','appId'].forEach(key => requireText_(body[key], key, 200));
+  if (body.appId !== CRM_APP_ID) throw new Error('Invalid App ID');
+  const response = platformRequest_({ action: 'exchangeAdminSession', launchTicket: body.launchTicket, launchNonce: body.launchNonce, browserProof: body.browserProof, appId: CRM_APP_ID });
+  const expiry = Date.parse(String(response.expiresAt || ''));
+  if (response.success !== true || response.appId !== CRM_APP_ID || response.contract !== 'ava-admin-session-v1' || !response.adminSessionProof || !Number.isFinite(expiry) || expiry <= Date.now()) throw new Error('CRM Admin launch was not authorized');
+  return { success: true, appId: CRM_APP_ID, adminSessionProof: String(response.adminSessionProof), expiresAt: String(response.expiresAt), contract: response.contract };
 }
 
 function replaceOfficialArea_(body) {
-  const operation = requireText_(body.operation, 'operation', 80);
-  const sheetName = OFFICIAL_OPERATIONS[operation];
-  if (!sheetName) throw new Error('Operation is not allowed');
-  const rows = validateRows_(body.rows, sheetName);
-  verifyAppGrant_(body.appGrant, operation);
-
-  const lock = LockService.getScriptLock();
-  lock.waitLock(10000);
+  const operation = requireText_(body.operation, 'operation', 80), sheetName = OFFICIAL_OPERATIONS[operation];
+  if (!sheetName || body.appId !== CRM_APP_ID) throw new Error('Operation is not allowed');
+  const rows = validateRows_(body.rows, sheetName), proof = requireText_(body.adminSessionProof, 'adminSessionProof', 400), expectedVersion = requireText_(body.expectedVersion, 'expectedVersion', 200);
+  verifyAdminSession_(proof, 'crm:official-write:' + operation);
+  const lock = LockService.getScriptLock(); lock.waitLock(10000); let snapshot;
   try {
-    const sheet = sheet_(sheetName);
-    const headers = headers_(sheet);
-    assertSheetSafeForReplacement_(sheet, headers.length);
-    sheet.clearContents();
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    if (rows.length) sheet.getRange(2, 1, rows.length, headers.length).setValues(rows.map(row => headers.map(header => row[header] ?? '')));
-    return { success: true, operation, area: sheetName, count: rows.length };
-  } finally {
-    lock.releaseLock();
-  }
+    if (expectedVersion !== officialRevision_()) throw new Error('Stale Official revision');
+    const sheet = sheet_(sheetName); const headers = headers_(sheet); assertSheetSafeForReplacement_(sheet, headers.length); snapshot = snapshotSheet_(sheet);
+    const values = rows.map(row => headers.map(header => row[header] ?? ''));
+    if (values.length + 1 > sheet.getMaxRows()) throw new Error('Official sheet capacity is insufficient');
+    if (values.length) sheet.getRange(2, 1, values.length, headers.length).setValues(values);
+    const trailing = Math.max(0, sheet.getLastRow() - 1 - values.length); if (trailing) sheet.getRange(values.length + 2, 1, trailing, headers.length).clearContent();
+    const actual = rows_(sheet); if (JSON.stringify(actual) !== JSON.stringify(rows)) throw new Error('Official read-after-write verification failed');
+    return { success: true, appId: CRM_APP_ID, operation, area: sheetName, count: rows.length, revision: officialRevision_() };
+  } catch (error) { if (snapshot) restoreSheet_(snapshot); throw error; } finally { lock.releaseLock(); }
 }
 
-function verifyAppGrant_(appGrant, operation) {
-  const grant = requireText_(appGrant, 'appGrant', 200);
-  const response = platformRequest_({ action: 'verifyAppGrant', appGrant: grant, appId: CRM_APP_ID, operation });
-  if (response.success !== true || String(response.appId) !== CRM_APP_ID || String(response.operation) !== operation) throw new Error('Invalid or unauthorized CRM App grant');
+function verifyAdminSession_(proof, operation) {
+  const response = platformRequest_({ action: 'verifyAdminSession', adminSessionProof: proof, appId: CRM_APP_ID, operation });
   const expiry = Date.parse(String(response.expiresAt || ''));
-  if (!Number.isFinite(expiry) || expiry <= Date.now()) throw new Error('CRM App grant expired');
+  if (response.success !== true || response.appId !== CRM_APP_ID || response.operation !== operation || response.contract !== 'ava-admin-session-v1' || !Number.isFinite(expiry) || expiry <= Date.now()) throw new Error('Invalid or expired CRM Admin session');
+  return response;
+}
+
+pired');
   return response;
 }
 
@@ -105,6 +101,10 @@ function platformRequest_(body) {
   if (response.getResponseCode() < 200 || response.getResponseCode() >= 300 || result.success !== true) throw new Error(String(result.error || 'AVA Platform authorization failed'));
   return result;
 }
+
+function officialRevision_() { const text = JSON.stringify(readOfficialRegistry_()); return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, text).map(byte => (byte + 256).toString(16).slice(-2)).join(''); }
+function snapshotSheet_(sheet) { const range = sheet.getDataRange(); return { sheet, values: range.getValues(), formulas: range.getFormulas() }; }
+function restoreSheet_(snapshot) { snapshot.sheet.getDataRange().clearContent(); if (!snapshot.values.length) return; snapshot.sheet.getRange(1, 1, snapshot.values.length, snapshot.values[0].length).setValues(snapshot.values); snapshot.formulas.forEach((row, r) => row.forEach((formula, c) => { if (formula) snapshot.sheet.getRange(r + 1, c + 1).setFormula(formula); })); }
 
 function readOfficialRegistry_() {
   return Object.fromEntries(Object.values(OFFICIAL_SHEETS).map(name => [name, rows_(sheet_(name))]));
