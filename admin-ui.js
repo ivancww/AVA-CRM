@@ -50,6 +50,7 @@ export function createAdminClient({ fetchImpl = globalThis.fetch, endpoint = OFF
   // Proof remains in this closure only; it is never written to URL or browser storage.
   let adminSessionProof = '';
   let proofExpiresAt = 0;
+  let expectedVersion = '';
 
   async function request(body) {
     const response = await fetchImpl(endpoint, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) });
@@ -72,8 +73,9 @@ export function createAdminClient({ fetchImpl = globalThis.fetch, endpoint = OFF
       const operation = ADMIN_AREA_OPERATIONS[area];
       if (!operation) throw new Error('Official area 不在固定 allowlist。');
       if (!adminSessionProof || proofExpiresAt <= Date.now()) throw new Error('CRM Admin authorization 已失效，請由 AVA Studio 重新進入。');
-      return request({ action: 'replaceOfficialArea', operation, appId: CRM_APP_ID, adminSessionProof, rows });
+      return request({ action: 'replaceOfficialArea', operation, appId: CRM_APP_ID, adminSessionProof, expectedVersion, rows });
     }
+    , setExpectedVersion(version) { expectedVersion = String(version || ''); }
   });
 }
 
@@ -118,6 +120,7 @@ export async function initializeAdmin({ documentObject = document, windowObject 
   if (!response.ok || payload?.success !== true || !payload.data || typeof payload.data !== 'object') { renderDenied({ documentObject, reason: 'Official data 載入失敗；沒有初始化空白資料。' }); return { authorized: false, reason: 'official-fetch-failed' }; }
 
   const official = Object.fromEntries(AREA_ORDER.map((area) => [area, Array.isArray(payload.data[area]) ? clone(payload.data[area]) : []]));
+  client.setExpectedVersion(String(payload.revision || ''));
   const draft = clone(official); let activeArea = AREA_ORDER[0];
   const header = documentObject.querySelector('#agentHeader');
   documentObject.querySelector('main')?.setAttribute('hidden', ''); documentObject.querySelector('footer')?.setAttribute('hidden', '');
@@ -140,7 +143,7 @@ export async function initializeAdmin({ documentObject = document, windowObject 
   root.querySelectorAll('[data-admin-area]').forEach((button) => button.addEventListener('click', () => selectArea(button.dataset.adminArea)));
   root.querySelector('#adminAddRow').addEventListener('click', () => { const headers = headersFor(activeArea); if (!headers.length) return setStatus('未能新增：Official schema 未知，系統不會猜測欄位。', 'error'); draft[activeArea].push(Object.fromEntries(headers.map((header) => [header, '']))); saveButton.disabled = true; renderRows(); setStatus('已有未保存變更。請先 Review / Preview。'); });
   root.querySelector('#adminReview').addEventListener('click', () => { const headers = headersFor(activeArea); const problems = validateOfficialRows(draft[activeArea], headers); if (problems.length) { saveButton.disabled = true; setStatus(`Review 未通過：${problems.join(' ')}`, 'error'); return; } const changed = JSON.stringify(draft[activeArea]) !== JSON.stringify(official[activeArea]); saveButton.disabled = !changed; setStatus(changed ? `Review 通過：${activeArea} 將替換 ${draft[activeArea].length} 行 Official records。再次按 Save Official 才會送出。` : '沒有變更；未有 Official write。', changed ? 'ready' : ''); });
-  saveButton.addEventListener('click', async () => { const headers = headersFor(activeArea); const problems = validateOfficialRows(draft[activeArea], headers); if (problems.length) return setStatus(`Save blocked：${problems.join(' ')}`, 'error'); saveButton.disabled = true; setStatus('正在透過 CRM backend 驗證並保存…'); try { await client.saveOfficialArea(activeArea, clone(draft[activeArea])); official[activeArea] = clone(draft[activeArea]); setStatus(`已保存 ${activeArea}；共 ${official[activeArea].length} 行。`, 'success'); } catch (error) { saveButton.disabled = false; setStatus(`Save 失敗：${error.message}。未保存的 UI 變更仍然保留。`, 'error'); } });
+  saveButton.addEventListener('click', async () => { const headers = headersFor(activeArea); const problems = validateOfficialRows(draft[activeArea], headers); if (problems.length) return setStatus(`Save blocked：${problems.join(' ')}`, 'error'); saveButton.disabled = true; setStatus('正在透過 CRM backend 驗證並保存…'); try { const saved = await client.saveOfficialArea(activeArea, clone(draft[activeArea])); client.setExpectedVersion(saved.revision || ''); official[activeArea] = clone(draft[activeArea]); setStatus(`已保存 ${activeArea}；共 ${official[activeArea].length} 行。`, 'success'); } catch (error) { saveButton.disabled = false; setStatus(`Save 失敗：${error.message}。未保存的 UI 變更仍然保留。`, 'error'); } });
   selectArea(activeArea);
   return { authorized: true };
 }
