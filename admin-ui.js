@@ -25,35 +25,54 @@ export function validateOfficialRows(rows, headers) {
   return problems;
 }
 
-export function createAdminClient({ fetchImpl = globalThis.fetch, endpoint = OFFICIAL_GAS_ENDPOINT } = {}) {
-  // Deliberately private closure state. No browser storage or URL state is used.
-  let appGrant = '';
-  let grantExpiresAt = 0;
+const CRM_APP_ID = 'crm';
+const PLATFORM_ORIGIN = 'https://ivancww.github.io';
+
+function browserProofFromOpener(launchTicket, launchNonce, windowObject = globalThis.window) {
+  if (!launchTicket || !launchNonce || !windowObject?.opener) throw new Error('CRM Admin 必須由 AVA Studio 啟動。');
+  return new Promise((resolve, reject) => {
+    const opener = windowObject.opener; let settled = false;
+    const finish = (error, value) => { if (settled) return; settled = true; clearTimeout(timer); windowObject.removeEventListener('message', onMessage); error ? reject(error) : resolve(value); };
+    const timer = windowObject.setTimeout(() => finish(new Error('AVA browser binding expired')), 15000);
+    const onMessage = event => {
+      if (event.source !== opener || event.origin !== PLATFORM_ORIGIN) return;
+      const data = event.data || {};
+      if (data.type !== 'ava-admin-session-response' || data.appId !== CRM_APP_ID || data.launchTicket !== launchTicket || data.launchNonce !== launchNonce) return;
+      if (!data.browserProof || data.contract !== 'ava-admin-session-v1') return finish(new Error('CRM browser proof 無效。'));
+      finish(null, data);
+    };
+    windowObject.addEventListener('message', onMessage);
+    opener.postMessage({ type: 'ava-admin-session-request', appId: CRM_APP_ID, launchTicket, launchNonce }, PLATFORM_ORIGIN);
+  });
+}
+
+export function createAdminClient({ fetchImpl = globalThis.fetch, endpoint = OFFICIAL_GAS_ENDPOINT, windowObject = globalThis.window } = {}) {
+  // Proof remains in this closure only; it is never written to URL or browser storage.
+  let adminSessionProof = '';
+  let proofExpiresAt = 0;
 
   async function request(body) {
     const response = await fetchImpl(endpoint, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) });
-    let payload;
-    try { payload = await response.json(); } catch (_) { throw new Error('CRM Admin 回應無效。'); }
+    let payload; try { payload = await response.json(); } catch (_) { throw new Error('CRM Admin 回應無效。'); }
     if (!response.ok || payload.success !== true) throw new Error(payload.error || 'CRM Admin request failed');
     return payload;
   }
 
   return Object.freeze({
-    async exchangeLaunch(launchTicket) {
-      if (!launchTicket || typeof launchTicket !== 'string' || launchTicket.length > 200) throw new Error('Admin launch ticket 無效。');
-      const payload = await request({ action: 'exchangeAppLaunch', launchTicket });
-      if (!payload.appGrant || !payload.expiresAt) throw new Error('CRM Admin authorization 未完成。');
-      const expiry = Date.parse(payload.expiresAt);
-      if (!Number.isFinite(expiry) || expiry <= Date.now()) throw new Error('CRM Admin authorization 已過期。');
-      appGrant = String(payload.appGrant);
-      grantExpiresAt = expiry;
-      return { success: true, expiresAt: payload.expiresAt };
+    async exchangeLaunch({ launchTicket, launchNonce }) {
+      if (!launchTicket || typeof launchTicket !== 'string' || launchTicket.length > 200 || !launchNonce || typeof launchNonce !== 'string' || launchNonce.length > 200) throw new Error('CRM Admin launch ticket 無效。');
+      const browser = await browserProofFromOpener(launchTicket, launchNonce, windowObject);
+      const payload = await request({ action: 'exchangeAdminSession', launchTicket, launchNonce, browserProof: browser.browserProof, appId: CRM_APP_ID });
+      const expiry = Date.parse(payload.expiresAt || '');
+      if (payload.appId !== CRM_APP_ID || payload.contract !== 'ava-admin-session-v1' || !payload.adminSessionProof || !Number.isFinite(expiry) || expiry <= Date.now()) throw new Error('CRM Admin authorization 未完成。');
+      adminSessionProof = String(payload.adminSessionProof); proofExpiresAt = expiry;
+      return { success: true, expiresAt: payload.expiresAt, contract: payload.contract };
     },
     async saveOfficialArea(area, rows) {
       const operation = ADMIN_AREA_OPERATIONS[area];
       if (!operation) throw new Error('Official area 不在固定 allowlist。');
-      if (!appGrant || grantExpiresAt <= Date.now()) throw new Error('CRM Admin authorization 已失效，請由 AVA Studio 重新進入。');
-      return request({ action: 'replaceOfficialArea', operation, appGrant, rows });
+      if (!adminSessionProof || proofExpiresAt <= Date.now()) throw new Error('CRM Admin authorization 已失效，請由 AVA Studio 重新進入。');
+      return request({ action: 'replaceOfficialArea', operation, appId: CRM_APP_ID, adminSessionProof, rows });
     }
   });
 }
@@ -82,9 +101,11 @@ function valueFromInput(input, original) {
 export async function initializeAdmin({ documentObject = document, windowObject = window, fetchImpl = fetch, endpoint = OFFICIAL_GAS_ENDPOINT } = {}) {
   const params = new URLSearchParams(windowObject.location.search);
   const ticket = params.get('avaAdminLaunch');
-  const client = createAdminClient({ fetchImpl, endpoint });
-  if (!ticket) { renderDenied({ documentObject, reason: '缺少 AVA Studio launch ticket。' }); return { authorized: false, reason: 'missing-ticket' }; }
-  try { await client.exchangeLaunch(ticket); } catch (error) { renderDenied({ documentObject, reason: error.message }); return { authorized: false, reason: error.message }; }
+  const launchNonce = params.get('avaAdminLaunchNonce');
+  const client = createAdminClient({ fetchImpl, endpoint, windowObject });
+  if (!ticket || !launchNonce) { renderDenied({ documentObject, reason: '缺少 AVA Studio launch ticket。' }); return { authorized: false, reason: 'missing-ticket' }; }
+  try { await client.exchangeLaunch({ launchTicket: ticket, launchNonce });
+    params.delete('avaAdminLaunch'); params.delete('avaAdminLaunchNonce'); windowObject.history?.replaceState(null, '', `${windowObject.location.pathname}${params.toString() ? '?' + params.toString() : ''}${windowObject.location.hash}`); } catch (error) { renderDenied({ documentObject, reason: error.message }); return { authorized: false, reason: error.message }; }
 
   let response; let payload;
   try {
