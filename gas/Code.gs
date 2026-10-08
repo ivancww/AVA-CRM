@@ -52,7 +52,7 @@ function parseBody_(event) {
   let body;
   try { body = JSON.parse(event.postData.contents); } catch (_) { throw new Error('Malformed JSON body'); }
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('JSON object is required');
-  }
+  return body;
 }
 
 function exchangeAdminSession_(body) {
