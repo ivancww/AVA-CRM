@@ -75,7 +75,7 @@ export function createAdminClient({ fetchImpl = globalThis.fetch, endpoint = OFF
       if (!adminSessionProof || proofExpiresAt <= Date.now()) throw new Error('CRM Admin authorization 已失效，請由 AVA Studio 重新進入。');
       const payload = await request({ action: 'replaceOfficialArea', operation, appId: CRM_APP_ID, adminSessionProof, expectedVersion, rows });
           const revision = String(payload.revision || '');
-          if (payload.appId !== CRM_APP_ID || payload.operation !== operation || payload.area !== area || !Number.isInteger(payload.count) || !/^[0-9a-f]{64}$/i.test(revision)) throw new Error('CRM Official persistence evidence incomplete.');
+          if (payload.appId !== CRM_APP_ID || payload.operation !== operation || payload.area !== area || !Number.isInteger(payload.count) || payload.count !== rows.length || !/^[0-9a-f]{64}$/i.test(revision)) throw new Error('CRM Official persistence evidence incomplete.');
           return payload;
     }
     , setExpectedVersion(version) { expectedVersion = String(version || ''); }
@@ -316,11 +316,14 @@ export async function initializeAdmin({ documentObject = document, windowObject 
     try {
       const saved = await client.saveOfficialArea(area, candidate);
       client.setExpectedVersion(saved.revision);
+      const draftChangedDuringSave = JSON.stringify(draft[area]) !== JSON.stringify(candidate);
       confirmed[area] = clone(candidate);
-      draft[area] = clone(candidate);
+      if (!draftChangedDuringSave) draft[area] = clone(candidate);
       renderTabs();
       renderPanels();
-      setStatus(area, '已保存「' + area + '」；server 已返回 revision、count、area 及 operation persistence evidence。', 'success');
+      setStatus(area, draftChangedDuringSave
+        ? '已保存「' + area + '」；server 已返回 revision、count、area 及 operation persistence evidence。保存期間的新草稿修改仍然保留，請再次 Review / Save。'
+        : '已保存「' + area + '」；server 已返回 revision、count、area 及 operation persistence evidence。', 'success');
     } catch (error) {
       if (saveButton) saveButton.disabled = false;
       setStatus(area, 'Save 失敗：' + error.message + '。未確認的草稿仍然保留。', 'error');
