@@ -84,6 +84,7 @@ export function createAdminClient({ fetchImpl = globalThis.fetch, endpoint = OFF
 
 function renderDenied({ documentObject, reason }) {
   documentObject.body.dataset.avaMode = 'admin-denied';
+  documentObject.querySelector('#adminContext')?.removeAttribute('hidden');
   documentObject.querySelector('#agentHeader')?.classList.add('admin-denied-header');
   documentObject.querySelector('main')?.setAttribute('hidden', '');
   documentObject.querySelector('footer')?.setAttribute('hidden', '');
