@@ -95,6 +95,24 @@ test('incomplete persistence evidence is rejected and cannot confirm a write', a
   await assert.rejects(() => client.saveOfficialArea('頁面設定', [{ id: 'p1', title: 'ok', enabled: true }]), /persistence evidence/);
 });
 
+test('Official save rejects an incorrect authoritative count', async () => {
+  const ticket = 'ticket';
+  const nonce = 'nonce';
+  const fetchImpl = async (_url, options) => {
+    const body = JSON.parse(options.body);
+    if (body.action === 'exchangeAdminSession') return { ok: true, json: async () => ({ success: true, appId: 'crm', adminSessionProof: 'opaque-proof', expiresAt: new Date(Date.now() + 60_000).toISOString(), contract: 'ava-admin-session-v1' }) };
+    return { ok: true, json: async () => ({ success: true, appId: 'crm', operation: 'replacePageSettings', area: '頁面設定', count: 2, revision: 'a'.repeat(64) }) };
+  };
+  const client = createAdminClient({ fetchImpl, endpoint: 'https://example.test/exec', windowObject: browserWindowFor(ticket, nonce) });
+  await client.exchangeLaunch({ launchTicket: ticket, launchNonce: nonce });
+  await assert.rejects(() => client.saveOfficialArea('頁面設定', [{ id: 'p1', title: 'ok', enabled: true }]), /persistence evidence/);
+});
+
+test('Admin preserves drafts changed while an Official save is in flight', () => {
+  assert.match(source, /draftChangedDuringSave/);
+  assert.match(source, /保存期間的新草稿修改仍然保留/);
+});
+
 test('Admin source does not use browser storage for Official session or customer data', () => {
   assert.doesNotMatch(source, /localStorage|sessionStorage|indexedDB|households|people|policies/);
   assert.match(source, /let adminSessionProof = ''/);
