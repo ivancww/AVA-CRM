@@ -16,10 +16,10 @@ test('existing CRM Official GET contract remains the public read path', () => {
 });
 
 test('CRM backend uses the Platform ticket and grant contract', () => {
-  assert.match(source, /action: 'exchangeAppLaunch'/);
-  assert.match(source, /action: 'verifyAppGrant'/);
+  assert.match(source, /action: 'exchangeAdminSession'/);
+  assert.match(source, /action: 'verifyAdminSession'/);
   assert.match(source, /appId: CRM_APP_ID/);
-  assert.match(source, /response\.appGrant/);
+  assert.match(source, /response\.adminSessionProof/);
   assert.match(source, /response\.operation/);
   assert.match(source, /Date\.parse/);
 });
