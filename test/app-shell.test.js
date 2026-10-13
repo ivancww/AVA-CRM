@@ -5,6 +5,21 @@ import test from 'node:test';
 
 const workerSource = fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
 const registrationSource = fs.readFileSync(new URL('../app-shell.js', import.meta.url), 'utf8');
+const appSource = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+
+const existingShellAssets = [
+  './',
+  './index.html',
+  './app.js',
+  './admin-ui.js',
+  './ava-entry.js',
+  './crm-core.js',
+  './styles.css',
+  './design-system.css',
+  './manifest.webmanifest',
+  './package.json',
+  './sw.js'
+];
 
 function loadWorker({ cacheNames = [], fetchImpl = async () => { throw new Error('offline'); } } = {}) {
   const listeners = {};
@@ -36,6 +51,14 @@ test('service worker owns only CRM resources and cleans only CRM shell caches', 
   const activation = loadWorker({ cacheNames: ['ava-crm-shell', 'ava-crm-shell-old', 'ava-platform-shell', 'other-app-shell'] });
   await new Promise((resolve) => activation.listeners.activate({ waitUntil: resolve }));
   assert.deepEqual(activation.deleted, ['ava-crm-shell-old']);
+});
+
+test('App Shell includes the policy extraction module and retains existing assets', () => {
+  for (const asset of existingShellAssets) {
+    assert.ok(workerSource.includes(`'${asset}'`), `missing existing App Shell asset: ${asset}`);
+  }
+  assert.ok(workerSource.includes("'./policy-extraction.js'"));
+  assert.ok(appSource.includes("from './policy-extraction.js';"));
 });
 
 test('navigation and shell resources use network-first with offline fallback', async () => {
