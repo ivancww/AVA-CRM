@@ -58,7 +58,7 @@ test('App Shell includes the policy extraction module and retains existing asset
     assert.ok(workerSource.includes(`'${asset}'`), `missing existing App Shell asset: ${asset}`);
   }
   assert.ok(workerSource.includes("'./policy-extraction.js'"));
-  assert.match(appSource, /from '\.\/policy-extraction\.js';/);
+  assert.ok(appSource.includes("from './policy-extraction.js';"));
 });
 
 test('navigation and shell resources use network-first with offline fallback', async () => {
