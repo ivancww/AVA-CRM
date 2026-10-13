@@ -44,6 +44,42 @@ The grant is transport data, not a CRM login. A future browser client must keep 
 
 The request cannot choose a sheet, range, or spreadsheet. Payload fields are checked against the existing first-row headers of the mapped sheet. Before replacement, the backend fails closed if the target has sheet/range protection, active filters, merged cells, hidden rows/columns, or formulas. Product Feature Registry records remain part of the verified `產品資料` area; AI/customer policy data is not accepted by this API. Live deployment still requires an authorized operator to verify the real tabs and headers.
 
+## Read-only Gemini policy extraction test
+
+The recognized `extractPolicyDocument` POST action is a separate, non-Admin-write path for extraction-quality testing. It accepts exactly one temporary inline document:
+
+```json
+{
+  "action": "extractPolicyDocument",
+  "fileName": "test.pdf",
+  "mimeType": "application/pdf",
+  "base64Data": "..."
+}
+```
+
+Supported MIME types are `application/pdf`, `image/jpeg`, `image/png`, and
+`image/webp`. The conservative maximum decoded document size is **8 MiB**.
+The GAS boundary validates the action, fields, MIME type, base64 syntax, and
+size before calling Gemini. It sends the inline data directly to the model;
+it does not create a Drive file, Sheet row, Properties value, Firebase object,
+IndexedDB record, or persistent `intakeDrafts` record.
+
+The API key and model are read only inside GAS with
+`PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY')` and
+`PropertiesService.getScriptProperties().getProperty('GEMINI_MODEL')`.
+Neither value is part of the browser request, frontend source, returned data,
+or safe error messages. The action uses fixed prompt/schema code; it does not
+accept a browser-provided prompt or arbitrary backend operation. HTTP 503 is
+retried at most twice after the initial attempt, with approximately 2-second
+and 5-second delays. 429 and final 503 responses are returned as a generic
+busy-service message.
+
+The frontend holds the extraction result in memory only and displays a
+`只讀測試模式 — 尚未寫入 CRM` badge. Official Product Registry matching is
+performed with the existing `resolveProductMatch` contract and returns
+`exact`, `candidate`, or `none`; this test path never calls
+`replaceOfficialArea` and never writes customer records.
+
 ## Deployment requirements
 
 These are deployment requirements, not proof of deployment:
