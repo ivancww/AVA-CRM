@@ -76,9 +76,12 @@ busy-service message.
 
 The frontend holds the extraction result in memory only and displays a
 `只讀測試模式 — 尚未寫入 CRM` badge. Official Product Registry matching is
-performed with the existing `resolveProductMatch` contract and returns
-`exact`, `candidate`, or `none`; this test path never calls
-`replaceOfficialArea` and never writes customer records.
+performed independently for every returned policy with the existing
+`resolveProductMatch` contract and returns `exact`, `candidate`, or `none`.
+The response is a document result shaped as `{ documentType, policies: [],
+documentWarnings: [] }`; one document may therefore contain one or more
+independent policy records. This test path never calls `replaceOfficialArea`
+and never writes customer records.
 
 ## Deployment requirements
 

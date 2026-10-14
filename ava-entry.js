@@ -8,6 +8,12 @@ export function resolveAvaEntry(search = '') {
   return SUPPORTED_ENTRIES.has(requested) ? requested : 'frontend';
 }
 
+// Frontstage editing is a User-entry capability only. Frontend and Admin
+// entries must remain presentation/authorization flows respectively.
+export function canEditFrontstage(entryMode) {
+  return entryMode === 'user';
+}
+
 export function returnToAvaUrl(entryMode, platformUrl = AVA_PLATFORM_URL) {
   const destination = new URL(platformUrl);
   destination.search = '';

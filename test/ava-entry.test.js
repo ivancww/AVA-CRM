@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import { AVA_PLATFORM_URL, CRM_CAPABILITIES, resolveAvaEntry, returnToAvaUrl } from '../ava-entry.js';
+import { AVA_PLATFORM_URL, CRM_CAPABILITIES, canEditFrontstage, resolveAvaEntry, returnToAvaUrl } from '../ava-entry.js';
 
 test('bare and frontend entry resolve to the real CRM Frontstage', () => {
   assert.equal(resolveAvaEntry(''), 'frontend');
@@ -13,6 +13,15 @@ test('user entry reuses the Frontstage and unsupported entries fail safely', () 
   assert.equal(resolveAvaEntry('?avaEntry=admin'), 'admin');
   assert.equal(resolveAvaEntry('?avaEntry=unknown'), 'frontend');
   assert.deepEqual(CRM_CAPABILITIES, { frontend: true, user: true, admin: false });
+});
+
+test('entry mode keeps User-only Frontstage editing out of Frontend and Admin', () => {
+  assert.equal(canEditFrontstage(resolveAvaEntry('?avaEntry=frontend')), false);
+  assert.equal(canEditFrontstage(resolveAvaEntry('?avaEntry=user')), true);
+  assert.equal(canEditFrontstage(resolveAvaEntry('?avaEntry=admin')), false);
+  const app = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+  assert.match(app, /if \(canEditFrontstage\(entryMode\)\) enterUserEditMode\(\)/);
+  assert.match(app, /\$\('editFrontstageBtn'\)\.hidden = !canEditFrontstage\(entryMode\)/);
 });
 
 test('Return to AVA uses the verified platform destination and surface contract', () => {
