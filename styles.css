@@ -90,6 +90,11 @@ body[data-ava-mode="presentation"] .app-footer #deviceTransferFooter { visibilit
 .modal-content h2 { margin: 0 0 8px; } .modal-content p { color: var(--ava-color-text-secondary); line-height: 1.6; }
 .read-only-badge { display: inline-flex; margin: 2px 0 12px; padding: 6px 10px; border-radius: 999px; color: var(--ava-color-primary); background: var(--ava-color-brand-soft); font-size: 12px; font-weight: 800; }
 .extraction-result { display: grid; gap: 12px; max-height: min(70vh, 720px); overflow: auto; padding-right: 4px; }
+.extraction-policy-cards { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.extraction-policy-card { display: grid; gap: 10px; min-width: 0; padding: 12px; border: 1px solid var(--ava-color-border); border-radius: 12px; background: var(--ava-color-background); }
+.extraction-policy-card .extraction-section { padding: 0; border: 0; background: transparent; }
+.extraction-policy-card .ava-button { justify-self: start; min-height: 42px; }
+.extraction-policy-detail { display: grid; gap: 12px; }
 .extraction-section { padding: 12px; border: 1px solid var(--ava-color-border); border-radius: 12px; background: var(--ava-color-background); }
 .extraction-section h3 { margin: 0 0 10px; color: var(--ava-color-primary); font-size: 15px; }
 .extraction-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }

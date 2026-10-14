@@ -60,6 +60,32 @@ export async function createExtractionRequest(file) {
   return buildExtractionRequest({ fileName: String(file.name || 'document'), mimeType: file.type, base64Data: arrayBufferToBase64(buffer) });
 }
 
+function looksLikePolicy(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) && (
+    'policyNumber' in value || 'insurer' in value || 'productName' in value ||
+    'policyholder' in value || 'insuredPeople' in value || 'premium' in value
+  );
+}
+
+// The backend now returns a document result. Keep a narrow compatibility
+// adapter for an older deployed GAS response so a single-policy document does
+// not break while the backend deployment is being rolled out.
+export function normalizeExtractionResult(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw extractionError(CLIENT_ERROR_MESSAGES.unavailable, 'invalid-extraction');
+  const policies = Array.isArray(value.policies) ? value.policies.filter((policy) => policy && typeof policy === 'object' && !Array.isArray(policy)) : looksLikePolicy(value) ? [value] : [];
+  if (!policies.length) throw extractionError(CLIENT_ERROR_MESSAGES.unavailable, 'empty-extraction');
+  return {
+    documentType: value.documentType ? String(value.documentType) : '',
+    policies,
+    documentWarnings: Array.isArray(value.documentWarnings) ? value.documentWarnings : []
+  };
+}
+
+export function resolvePolicyMatches(documentResult, registryProducts, resolver) {
+  if (typeof resolver !== 'function') throw new TypeError('A product resolver is required');
+  return normalizeExtractionResult(documentResult).policies.map((policy) => resolver(registryProducts, policy));
+}
+
 function responseError(payload, status) {
   const message = String(payload?.error || '');
   if (status === 429 || status === 503 || /temporarily busy|暫時繁忙|503|429/i.test(message)) return extractionError(CLIENT_ERROR_MESSAGES.busy, 'busy', status);
@@ -83,7 +109,7 @@ export async function extractPolicyDocumentFromFile(file, { fetchImpl = globalTh
   let payload;
   try { payload = await response.json(); } catch (_) { throw extractionError(CLIENT_ERROR_MESSAGES.unavailable, 'unavailable', response.status); }
   if (!response.ok || payload?.success !== true || !payload?.data) throw responseError(payload, response.status);
-  return payload.data;
+  return normalizeExtractionResult(payload.data);
 }
 
 export function clientExtractionErrorMessage(error) {

@@ -37,27 +37,19 @@ const GEMINI_EXTRACTION_SCHEMA = Object.freeze({
   type: 'OBJECT',
   properties: {
     documentType: { type: 'STRING' },
-    insurer: { type: 'STRING' },
-    productName: { type: 'STRING' },
-    productVersion: { type: 'STRING' },
-    policyNumber: { type: 'STRING' },
-    policyholder: { type: 'OBJECT', properties: { name: { type: 'STRING' }, confidence: { type: 'NUMBER' } } },
-    insuredPeople: { type: 'ARRAY', items: { type: 'OBJECT', properties: { name: { type: 'STRING' }, relationship: { type: 'STRING' }, confidence: { type: 'NUMBER' } } } },
-    policyStatus: { type: 'STRING' },
-    issueDate: { type: 'STRING' },
-    effectiveDate: { type: 'STRING' },
-    premium: { type: 'OBJECT', properties: { amount: { type: 'NUMBER' }, currency: { type: 'STRING' }, frequency: { type: 'STRING' }, confidence: { type: 'NUMBER' } } },
-    paymentTerm: { type: 'STRING' },
-    coverageTerm: { type: 'STRING' },
-    sumAssured: { type: 'ARRAY', items: { type: 'OBJECT', properties: { name: { type: 'STRING' }, amount: { type: 'NUMBER' }, currency: { type: 'STRING' }, confidence: { type: 'NUMBER' } } } },
-    benefits: { type: 'ARRAY', items: { type: 'OBJECT', properties: { name: { type: 'STRING' }, category: { type: 'STRING' }, amount: { type: 'NUMBER' }, currency: { type: 'STRING' }, limit: { type: 'STRING' }, notes: { type: 'STRING' }, confidence: { type: 'NUMBER' } } } },
-    cashValues: { type: 'ARRAY', items: { type: 'OBJECT', properties: { type: { type: 'STRING' }, yearOrAge: { type: 'STRING' }, guaranteed: { type: 'NUMBER' }, nonGuaranteed: { type: 'NUMBER' }, currency: { type: 'STRING' }, confidence: { type: 'NUMBER' } } } },
-    riders: { type: 'ARRAY', items: { type: 'STRING' } },
-    keyDates: { type: 'ARRAY', items: { type: 'STRING' } },
-    missingFields: { type: 'ARRAY', items: { type: 'STRING' } },
-    conflicts: { type: 'ARRAY', items: { type: 'STRING' } },
-    warnings: { type: 'ARRAY', items: { type: 'STRING' } },
-    overallConfidence: { type: 'NUMBER' }
+    policies: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
+      insurer: { type: 'STRING' }, productName: { type: 'STRING' }, productVersion: { type: 'STRING' }, policyNumber: { type: 'STRING' },
+      policyholder: { type: 'OBJECT', properties: { name: { type: 'STRING' }, confidence: { type: 'NUMBER' } } },
+      insuredPeople: { type: 'ARRAY', items: { type: 'OBJECT', properties: { name: { type: 'STRING' }, relationship: { type: 'STRING' }, confidence: { type: 'NUMBER' } } } },
+      policyStatus: { type: 'STRING' }, issueDate: { type: 'STRING' }, effectiveDate: { type: 'STRING' },
+      premium: { type: 'OBJECT', properties: { amount: { type: 'NUMBER' }, currency: { type: 'STRING' }, frequency: { type: 'STRING' }, confidence: { type: 'NUMBER' } } },
+      paymentTerm: { type: 'STRING' }, coverageTerm: { type: 'STRING' },
+      sumAssured: { type: 'ARRAY', items: { type: 'OBJECT', properties: { name: { type: 'STRING' }, amount: { type: 'NUMBER' }, currency: { type: 'STRING' }, confidence: { type: 'NUMBER' } } } },
+      benefits: { type: 'ARRAY', items: { type: 'OBJECT', properties: { name: { type: 'STRING' }, category: { type: 'STRING' }, amount: { type: 'NUMBER' }, currency: { type: 'STRING' }, limit: { type: 'STRING' }, notes: { type: 'STRING' }, confidence: { type: 'NUMBER' } } } },
+      cashValues: { type: 'ARRAY', items: { type: 'OBJECT', properties: { type: { type: 'STRING' }, yearOrAge: { type: 'STRING' }, guaranteed: { type: 'NUMBER' }, nonGuaranteed: { type: 'NUMBER' }, currency: { type: 'STRING' }, confidence: { type: 'NUMBER' } } } },
+      riders: { type: 'ARRAY', items: { type: 'STRING' } }, keyDates: { type: 'ARRAY', items: { type: 'STRING' } }, missingFields: { type: 'ARRAY', items: { type: 'STRING' } }, conflicts: { type: 'ARRAY', items: { type: 'STRING' } }, warnings: { type: 'ARRAY', items: { type: 'STRING' } }, overallConfidence: { type: 'NUMBER' }
+    } } },
+    documentWarnings: { type: 'ARRAY', items: { type: 'STRING' } }
   }
 });
 
@@ -67,6 +59,10 @@ const GEMINI_EXTRACTION_PROMPT = [
   'Never invent, estimate, or infer missing values. Use empty strings, null, or empty arrays when unknown.',
   'Preserve original wording where appropriate. Keep explicit data separate from inferred data.',
   'Put uncertainty in warnings or the relevant confidence field, and put contradictory document statements in conflicts.',
+  'Inspect the entire document and determine how many independent policies it contains.',
+  'Separate independent policies by distinct policy identity, product, policy section, insured contract, or policy schedule.',
+  'Return every identified independent policy in policies[]. Never collapse separate policies merely because they share an insurer, policyholder, or insured person.',
+  'If policy boundaries are uncertain, preserve that uncertainty in documentWarnings or policy conflicts instead of silently merging records.',
   'Do not provide insurance advice. Do not calculate values that are not present in the document.',
   'Return only JSON matching the supplied extraction schema.'
 ].join(' ');
@@ -200,10 +196,21 @@ function parseGeminiExtraction_(response) {
 
 function normalizePolicyExtraction_(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw extractionError_('Gemini extraction is not an object', 'invalid-extraction', 'AI回傳格式無效，請稍後再試。');
+  const rawPolicies = Array.isArray(value.policies) ? value.policies : isLegacyPolicyExtraction_(value) ? [value] : [];
+  const policies = rawPolicies.slice(0, 100).filter(item => item && typeof item === 'object' && !Array.isArray(item)).map(normalizePolicyRecord_);
+  if (!policies.length) throw extractionError_('Gemini returned no policies', 'empty-extraction', '文件未能讀取出可核對的保單資料，請確認文件清晰後再試。');
+  return { documentType: extractionText_(value.documentType), policies, documentWarnings: extractionTextArray_(value.documentWarnings) };
+}
+
+function isLegacyPolicyExtraction_(value) {
+  return Object.prototype.hasOwnProperty.call(value, 'policyNumber') || Object.prototype.hasOwnProperty.call(value, 'insurer') || Object.prototype.hasOwnProperty.call(value, 'productName') || Object.prototype.hasOwnProperty.call(value, 'policyholder') || Object.prototype.hasOwnProperty.call(value, 'insuredPeople') || Object.prototype.hasOwnProperty.call(value, 'premium');
+}
+
+function normalizePolicyRecord_(value) {
   const policyholder = value.policyholder && typeof value.policyholder === 'object' ? value.policyholder : {};
   const premium = value.premium && typeof value.premium === 'object' ? value.premium : {};
   return {
-    documentType: extractionText_(value.documentType), insurer: extractionText_(value.insurer), productName: extractionText_(value.productName), productVersion: extractionText_(value.productVersion), policyNumber: extractionText_(value.policyNumber),
+    insurer: extractionText_(value.insurer), productName: extractionText_(value.productName), productVersion: extractionText_(value.productVersion), policyNumber: extractionText_(value.policyNumber),
     policyholder: { name: extractionText_(policyholder.name), confidence: extractionConfidence_(policyholder.confidence) },
     insuredPeople: extractionArray_(value.insuredPeople, item => ({ name: extractionText_(item && item.name), relationship: extractionText_(item && item.relationship), confidence: extractionConfidence_(item && item.confidence) })),
     policyStatus: extractionText_(value.policyStatus), issueDate: extractionText_(value.issueDate), effectiveDate: extractionText_(value.effectiveDate),
@@ -221,7 +228,7 @@ function extractionNumber_(value) { return typeof value === 'number' && Number.i
 function extractionConfidence_(value) { return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1 ? value : null; }
 function extractionArray_(value, mapper) { return Array.isArray(value) ? value.slice(0, 100).filter(item => item && typeof item === 'object' && !Array.isArray(item)).map(mapper) : []; }
 function extractionTextArray_(value) { return Array.isArray(value) ? value.slice(0, 100).map(item => extractionText_(typeof item === 'string' ? item : JSON.stringify(item))).filter(Boolean) : []; }
-function hasMeaningfulExtraction_(value) { return Boolean(value.documentType || value.insurer || value.productName || value.policyNumber || value.policyholder.name || value.insuredPeople.length || value.premium.amount !== null || value.benefits.length || value.cashValues.length || value.sumAssured.length); }
+function hasMeaningfulExtraction_(value) { return Boolean(value && Array.isArray(value.policies) && value.policies.some(policy => policy && (policy.insurer || policy.productName || policy.policyNumber || policy.policyholder.name || policy.insuredPeople.length || policy.premium.amount !== null || policy.benefits.length || policy.cashValues.length || policy.sumAssured.length))); }
 function extractionError_(message, failureClass, publicMessage, httpStatus) { const error = new Error(message); error.failureClass = failureClass; error.publicMessage = publicMessage; error.httpStatus = httpStatus || 0; return error; }
 function logExtraction_(entry) { console.log(JSON.stringify({ timestamp: new Date().toISOString(), event: 'crm-policy-extraction', model: entry.model || '', httpStatus: entry.status || 0, durationMs: entry.durationMs || 0, mimeType: entry.mimeType || '', fileSize: entry.fileSize || 0, outcome: entry.outcome || 'failure' })); }
 
