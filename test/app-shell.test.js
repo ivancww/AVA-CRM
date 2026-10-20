@@ -7,6 +7,7 @@ const workerSource = fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8
 const registrationSource = fs.readFileSync(new URL('../app-shell.js', import.meta.url), 'utf8');
 const appSource = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
 
+const policyExtractionAsset = './policy-extraction.js';
 const existingShellAssets = [
   './',
   './index.html',
@@ -57,7 +58,7 @@ test('App Shell includes the policy extraction module and retains existing asset
   for (const asset of existingShellAssets) {
     assert.ok(workerSource.includes(`'${asset}'`), `missing existing App Shell asset: ${asset}`);
   }
-  assert.ok(workerSource.includes("'./policy-extraction.js'"));
+  assert.ok(workerSource.includes(`'${policyExtractionAsset}'`));
   assert.ok(appSource.includes("from './policy-extraction.js';"));
 });
 
