@@ -9,6 +9,7 @@ export const SUPPORTED_DOCUMENT_MIME_TYPES = Object.freeze([
 
 // Keep the inline Gemini request well below Apps Script and upstream request limits.
 export const MAX_DOCUMENT_BYTES = 8 * 1024 * 1024;
+export const DOCUMENT_ACCEPT = SUPPORTED_DOCUMENT_MIME_TYPES.join(',');
 
 const CLIENT_ERROR_MESSAGES = Object.freeze({
   unsupported: '只支援 PDF、JPEG、PNG 或 WEBP 文件。',
@@ -115,4 +116,14 @@ export async function extractPolicyDocumentFromFile(file, { fetchImpl = globalTh
 export function clientExtractionErrorMessage(error) {
   if (error?.code === 'unsupported' || error?.code === 'empty' || error?.code === 'oversized' || error?.code === 'malformed' || error?.code === 'busy') return error.message;
   return CLIENT_ERROR_MESSAGES.unavailable;
+}
+
+
+// Keep the input mounted and invoke it only from the trigger's direct gesture.
+export function attachDocumentPicker({ trigger, input, onFile }) {
+  if (!trigger || !input || typeof trigger.addEventListener !== 'function' || typeof input.addEventListener !== 'function' || typeof input.click !== 'function') throw new TypeError('A mounted document picker is required');
+  input.accept = DOCUMENT_ACCEPT;
+  const handleChange = (event) => { const file = event?.target?.files?.[0] || null; if (file && typeof onFile === 'function') onFile(file); };
+  const openPicker = () => input.click(); input.addEventListener('change', handleChange); trigger.addEventListener('click', openPicker);
+  return () => { input.removeEventListener('change', handleChange); trigger.removeEventListener('click', openPicker); };
 }
