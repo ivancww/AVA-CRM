@@ -20,3 +20,9 @@ export function returnToAvaUrl(entryMode, platformUrl = AVA_PLATFORM_URL) {
   if (entryMode === 'user') destination.searchParams.set('avaSurface', 'user');
   return destination.toString();
 }
+
+
+// The installed PWA defaults to Frontend; explicit Platform URLs remain authoritative.
+export function defaultAvaStartUrl(path = './') {
+  const url = new URL(path, 'https://ava-crm.invalid/'); url.search = '?avaEntry=frontend'; url.hash = ''; return url.pathname + url.search;
+}

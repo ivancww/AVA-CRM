@@ -48,5 +48,23 @@ export async function queryIndexPrefix(db, storeName, indexName, prefix, limit =
 export function relevantPolicyIds(roles = [], insuredPersonId) { return [...new Set(roles.filter((role) => role.insuredPersonId === insuredPersonId).map((role) => role.policyId).filter(Boolean))]; }
 export async function loadInsuredPersonData(db, insuredPersonId) { const roles = await queryByIndex(db, 'policyRoles', 'byInsuredPersonId', insuredPersonId); const policyIds = relevantPolicyIds(roles, insuredPersonId); const policies = (await Promise.all(policyIds.map((policyId) => getById(db, 'policies', policyId)))).filter(Boolean); const benefits = (await Promise.all(policyIds.map((policyId) => queryByIndex(db, 'benefits', 'byPolicyId', policyId)))).flat(); const values = (await Promise.all(policyIds.map((policyId) => queryByIndex(db, 'policyValues', 'byPolicyId', policyId)))).flat(); return { roles, policies, benefits: dedupeBenefits(benefits), values }; }
 export async function exportUserLayer(db) { if (!db) return null; const data = {}; for (const storeName of STORE_NAMES) data[storeName] = await new Promise((resolve, reject) => { const request = db.transaction(storeName, 'readonly').objectStore(storeName).getAll(); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); return { app: 'AVA-CRM', schemaVersion: DB_VERSION, exportedAt: new Date().toISOString(), data }; }
+export function validateUserLayerExport(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('資料檔格式無效');
+  if (payload.app !== 'AVA-CRM') throw new Error('資料檔不是 AVA-CRM');
+  if (payload.schemaVersion !== DB_VERSION) throw new Error('資料檔版本不受支援');
+  if (!payload.data || typeof payload.data !== 'object' || Array.isArray(payload.data)) throw new Error('資料檔結構無效');
+  const keys = Object.keys(payload.data); if (keys.length !== STORE_NAMES.length || keys.some((key) => !STORE_NAMES.includes(key))) throw new Error('資料檔缺少必要資料區域');
+  for (const storeName of STORE_NAMES) if (!Array.isArray(payload.data[storeName]) || payload.data[storeName].some((record) => !record || typeof record !== 'object' || Array.isArray(record))) throw new Error('資料檔內容無效');
+  return payload;
+}
+
+export async function restoreUserLayer(db, payload) {
+  validateUserLayerExport(payload); if (!db) throw new Error('本機資料庫不可用');
+  return new Promise((resolve, reject) => { let settled = false; const finish = (fn, value) => { if (settled) return; settled = true; fn(value); }; let tx; try { tx = db.transaction(STORE_NAMES, 'readwrite'); } catch (error) { finish(reject, error); return; }
+    tx.oncomplete = () => finish(resolve, true); tx.onerror = () => finish(reject, tx.error || new Error('資料檔恢復失敗')); tx.onabort = () => finish(reject, tx.error || new Error('資料檔恢復失敗'));
+    try { for (const storeName of STORE_NAMES) { const store = tx.objectStore(storeName); store.clear(); for (const record of payload.data[storeName]) store.add(record); } } catch (error) { try { tx.abort(); } catch (_) {} finish(reject, error); }
+  });
+}
+
 export async function saveUserLayerMutation({ db, storeName, value, fileHandle, exportFn = exportUserLayer, saveFn = saveLocal }) { const saved = await saveFn(db, storeName, value); if (!saved) return { saved: false, fileSync: 'unavailable' }; if (!fileHandle) return { saved: true, fileSync: 'pending' }; try { const writable = await fileHandle.createWritable(); await writable.write(JSON.stringify(await exportFn(db), null, 2)); await writable.close(); return { saved: true, fileSync: 'synced' }; } catch { return { saved: true, fileSync: 'unavailable' }; } }
 export async function loadOfficialRegistry(fetchImpl = fetch, storage = localStorage) { const cacheKey = 'ava-crm-official-registry-v3'; try { const response = await fetchImpl(OFFICIAL_GAS_ENDPOINT, { headers: { Accept: 'application/json' } }); if (!response.ok) throw new Error(`Official registry request failed: ${response.status}`); const payload = await response.json(); storage.setItem(cacheKey, JSON.stringify({ savedAt: new Date().toISOString(), payload })); return { source: 'official', payload }; } catch { try { const cached = JSON.parse(storage.getItem(cacheKey) || 'null'); if (cached?.payload) return { source: 'official-cache', payload: cached.payload }; } catch { /* safe fallback */ } return { source: 'built-in-fallback', payload: emptyOfficialRegistry() }; } }

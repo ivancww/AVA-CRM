@@ -176,3 +176,6 @@ html,body{max-width:100%;overflow-x:hidden}
 @media (max-width:700px){.admin-tabs{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.admin-tab{min-height:70px;padding:12px 8px;font-size:14px}.admin-domain{padding:16px}.admin-domain-heading{display:block}.admin-count{width:max-content;min-width:96px;margin-top:12px;text-align:left}.admin-record-tools{grid-template-columns:1fr}.admin-field-grid{grid-template-columns:1fr}.admin-actions{align-items:stretch}.admin-actions .ava-button{flex:1 1 100%;width:100%}}
 @media (max-width:430px){.admin-tabs{grid-template-columns:repeat(2,minmax(0,1fr))}.admin-tab{min-height:64px;font-size:13px}.admin-domain{padding:14px}.admin-record{padding:14px}.admin-record-heading{display:block}.admin-record-index{display:block;margin-top:6px}.admin-system-grid{grid-template-columns:1fr}.admin-context{display:none!important}}
 @media (min-width:1001px){.admin-root{padding-top:12px}}
+
+
+.visually-hidden{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0 0 0 0)!important;white-space:nowrap!important;border:0!important}
