@@ -6,6 +6,7 @@ import test from 'node:test';
 const workerSource = fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
 const registrationSource = fs.readFileSync(new URL('../app-shell.js', import.meta.url), 'utf8');
 const appSource = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+const packageSource = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
 const policyExtractionAsset = './policy-extraction.js';
 const existingShellAssets = [
@@ -22,20 +23,27 @@ const existingShellAssets = [
   './sw.js'
 ];
 
-function loadWorker({ cacheNames = [], fetchImpl = async () => { throw new Error('offline'); } } = {}) {
+function loadWorker({ cacheNames = [], packageVersion = packageSource.version, fetchImpl, offlineFallback } = {}) {
   const listeners = {};
   const deleted = [];
+  const opened = [];
   const cache = { addAll: async () => undefined, put: async () => undefined };
+  const networkFetch = fetchImpl || (async () => { throw new Error('offline'); });
+  const fetchWithRelease = async (request) => {
+    const requestUrl = new URL(request?.url || request, 'https://example.test/CRM/sw.js');
+    if (requestUrl.pathname.endsWith('/package.json')) return new Response(JSON.stringify({ version: packageVersion }), { status: 200 });
+    return networkFetch(request);
+  };
   const context = {
     URL,
     Response,
     Promise,
-    fetch: fetchImpl,
+    fetch: fetchWithRelease,
     caches: {
-      open: async () => cache,
+      open: async (name) => { opened.push(name); return cache; },
       keys: async () => cacheNames,
       delete: async (name) => { deleted.push(name); return true; },
-      match: async () => undefined
+      match: async () => offlineFallback
     },
     self: {
       location: { origin: 'https://example.test', href: 'https://example.test/CRM/sw.js' },
@@ -45,13 +53,20 @@ function loadWorker({ cacheNames = [], fetchImpl = async () => { throw new Error
     }
   };
   vm.runInNewContext(workerSource, context);
-  return { listeners, deleted };
+  return { listeners, deleted, opened };
 }
 
 test('service worker owns only CRM resources and cleans only CRM shell caches', async () => {
-  const activation = loadWorker({ cacheNames: ['ava-crm-shell', 'ava-crm-shell-old', 'ava-platform-shell', 'other-app-shell'] });
+  const activation = loadWorker({ cacheNames: ['ava-crm-shell', 'ava-crm-shell-0.4.1', 'ava-crm-shell-0.5.0', 'ava-platform-shell', 'other-app-shell'] });
   await new Promise((resolve) => activation.listeners.activate({ waitUntil: resolve }));
-  assert.deepEqual(activation.deleted, ['ava-crm-shell-old']);
+  assert.deepEqual(activation.deleted, ['ava-crm-shell', 'ava-crm-shell-0.4.1']);
+});
+
+test('formal release version deterministically changes the App Shell cache identity', async () => {
+  const release = loadWorker({ packageVersion: '0.5.0' });
+  await new Promise((resolve) => release.listeners.install({ waitUntil: resolve }));
+  assert.ok(release.opened.includes('ava-crm-shell-0.5.0'));
+  assert.doesNotMatch(workerSource, /const CACHE_NAME\s*=/);
 });
 
 test('App Shell includes the policy extraction module and retains existing assets', () => {
@@ -75,6 +90,16 @@ test('navigation and shell resources use network-first with offline fallback', a
   });
   assert.equal((await response).status, 200);
   assert.equal(requests.length, 1);
+});
+
+test('offline shell requests remain supported when release metadata is unavailable', async () => {
+  const { listeners } = loadWorker({ fetchImpl: async () => { throw new Error('offline'); }, offlineFallback: new Response('cached shell', { status: 200 }) });
+  let response;
+  listeners.fetch({
+    request: { method: 'GET', url: 'https://example.test/CRM/index.html', mode: 'navigate', destination: 'document' },
+    respondWith: (promise) => { response = promise; }
+  });
+  assert.equal((await response).status, 200);
 });
 
 test('direct and Platform-style launches use the CRM-owned scope and force a worker check', async () => {
@@ -120,4 +145,13 @@ test('update lifecycle never clears CRM user storage', () => {
   assert.match(workerSource, /CACHE_PREFIX/);
   assert.match(fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8'), /fetch\('\.\/package\.json', \{ cache: 'no-store' \}\)/);
   assert.match(fs.readFileSync(new URL('../manifest.webmanifest', import.meta.url), 'utf8'), /"scope":"\.\/"/);
+  assert.match(workerSource, /package\.json/);
+  assert.match(workerSource, /clients\.claim\(\)/);
+});
+
+test('release contract uses package.json for the visible version and startup update check', () => {
+  assert.equal(packageSource.version, '0.5.0');
+  assert.match(appSource, /fetch\('\.\/package\.json', \{ cache: 'no-store' \}\)/);
+  assert.match(appSource, /registerAppShellUpdate\(\)\.catch/);
+  assert.match(registrationSource, /registration\.update\(\)/);
 });
