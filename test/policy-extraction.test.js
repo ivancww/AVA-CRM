@@ -55,6 +55,29 @@ test('frontend posts one temporary document and accepts only a successful struct
   assert.doesNotMatch(call.options.body, /GEMINI_API_KEY|GEMINI_MODEL|prompt/i);
 });
 
+test('progress uses indeterminate transfer/analysis and completes only after a valid response', async () => {
+  const stages = [];
+  await extractPolicyDocumentFromFile(fakeFile(), { onStage: (stage) => stages.push(stage), fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ success: true, data: { policies: [{ policyNumber: 'P1' }] } }) }) });
+  assert.deepEqual(stages, ['validating', 'transferring-or-analyzing', 'completed']);
+});
+
+test('aborting before file reading completes prevents the network request', async () => {
+  const controller = new AbortController(); let finishRead; let sent = false;
+  const file = { ...fakeFile(), arrayBuffer: () => new Promise((resolve) => { finishRead = resolve; }) };
+  const pending = extractPolicyDocumentFromFile(file, { signal: controller.signal, fetchImpl: async () => { sent = true; } });
+  controller.abort(); finishRead(new Uint8Array([1]).buffer);
+  await assert.rejects(pending, { name: 'AbortError' });
+  assert.equal(sent, false);
+});
+
+test('cancelled requests do not return even if transport resolves after abort', async () => {
+  const controller = new AbortController(); let finishFetch;
+  const pending = extractPolicyDocumentFromFile(fakeFile(), { signal: controller.signal, fetchImpl: () => new Promise((resolve) => { finishFetch = resolve; }) });
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.abort(); finishFetch({ ok: true, status: 200, json: async () => ({ success: true, data: { policies: [{ policyNumber: 'P1' }] } }) });
+  await assert.rejects(pending, { name: 'AbortError' });
+});
+
 test('one-policy and three-policy document results remain independently addressable', () => {
   const one = normalizeExtractionResult({ documentType: '保單', policies: [{ policyNumber: 'P-001' }] });
   assert.equal(one.policies.length, 1);

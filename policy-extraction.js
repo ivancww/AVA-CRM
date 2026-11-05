@@ -95,22 +95,30 @@ function responseError(payload, status) {
   return extractionError(CLIENT_ERROR_MESSAGES.unavailable, 'unavailable', status);
 }
 
-export async function extractPolicyDocumentFromFile(file, { fetchImpl = globalThis.fetch, endpoint = OFFICIAL_GAS_ENDPOINT } = {}) {
+export async function extractPolicyDocumentFromFile(file, { fetchImpl = globalThis.fetch, endpoint = OFFICIAL_GAS_ENDPOINT, signal, onStage = () => {} } = {}) {
+  onStage('validating');
   const request = await createExtractionRequest(file);
+  if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+  onStage('transferring-or-analyzing');
   let response;
   try {
     response = await fetchImpl(endpoint, {
       method: 'POST',
       headers: { Accept: 'application/json', 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(request)
+      body: JSON.stringify(request),
+      signal
     });
-  } catch (_) {
+  } catch (error) {
+    if (signal?.aborted || error?.name === 'AbortError') throw new DOMException('Cancelled', 'AbortError');
     throw extractionError(CLIENT_ERROR_MESSAGES.unavailable, 'unavailable');
   }
   let payload;
   try { payload = await response.json(); } catch (_) { throw extractionError(CLIENT_ERROR_MESSAGES.unavailable, 'unavailable', response.status); }
   if (!response.ok || payload?.success !== true || !payload?.data) throw responseError(payload, response.status);
-  return normalizeExtractionResult(payload.data);
+  if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+  const result = normalizeExtractionResult(payload.data);
+  onStage('completed');
+  return result;
 }
 
 export function clientExtractionErrorMessage(error) {

@@ -6,6 +6,7 @@ import { DOCUMENT_ACCEPT, MAX_DOCUMENT_BYTES, attachDocumentPicker, clientExtrac
 
 const $ = (id) => document.getElementById(id); const modal = $('modal');
 let policyPickerCleanup = null;
+let extractionRequest = null;
 const state = { db: null, registry: null, households: [], household: null, people: [], insuredPerson: null, selectedData: { roles: [], policies: [], benefits: [], values: [] }, readOnlyExtraction: null, perception: '', activeCategory: 'medical', categoryPerceptions: {}, priority: '', sessionStep: 0, dataFileHandle: null, fileSync: 'pending', officialSource: 'built-in-fallback' };
 const entryMode = resolveAvaEntry(window.location.search);
 const editableFrontstageFields = ['homeTitle', 'intake-title'];
@@ -19,7 +20,7 @@ function extractionValue(value) { if (value === null || value === undefined || v
 function extractionConfidence(value) { return typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value * 100)}%` : '未有'; }
 function addExtractionSection(root, title, rows) { const section = document.createElement('section'); section.className = 'extraction-section'; const heading = document.createElement('h3'); heading.textContent = title; section.append(heading); const grid = document.createElement('div'); grid.className = 'extraction-grid'; rows.forEach(([label, value]) => { const item = document.createElement('div'); item.className = 'extraction-field'; const labelElement = document.createElement('span'); labelElement.className = 'extraction-label'; labelElement.textContent = label; const valueElement = document.createElement('strong'); valueElement.textContent = extractionValue(value); item.append(labelElement, valueElement); grid.append(item); }); section.append(grid); root.append(section); }
 function addExtractionList(root, title, values) { const section = document.createElement('section'); section.className = 'extraction-section'; const heading = document.createElement('h3'); heading.textContent = title; section.append(heading); const list = document.createElement('ul'); list.className = 'extraction-list'; const items = Array.isArray(values) && values.length ? values : ['未有資料']; items.forEach((value) => { const item = document.createElement('li'); item.textContent = extractionValue(value); list.append(item); }); section.append(list); root.append(section); }
-function closeExtractionTest() { state.readOnlyExtraction = null; if (modal.open) modal.close(); }
+function closeExtractionTest() { state.readOnlyExtraction = null; if (extractionRequest) { extractionRequest.controller.abort(); clearTimeout(extractionRequest.timer); clearInterval(extractionRequest.clock); extractionRequest = null; } policyPickerCleanup?.(); policyPickerCleanup = null; if (modal.open) modal.close(); }
 function maskPolicyNumber(value) { const text = String(value || '').trim(); return text ? (text.length <= 4 ? '••••' : `${text.slice(0, 2)}••••${text.slice(-2)}`) : '待確認'; }
 function productMatchLabel(match) { return match?.status === 'exact' ? 'exact' : match?.status === 'candidate' ? 'candidate · 需 Agent 確認' : 'none'; }
 function policyDetailContent(root, policy, productMatch) {
@@ -55,7 +56,7 @@ function showPolicyExtractionResult(extraction, productMatches) {
   const root = document.createElement('div'); root.className = 'extraction-result';
   const badge = document.createElement('span'); badge.className = 'read-only-badge'; badge.textContent = '只讀測試模式 — 尚未寫入 CRM'; root.append(badge);
   const note = document.createElement('p'); note.className = 'ava-support'; note.textContent = '以下內容只存在今次瀏覽器記憶體，請由 Agent 對照原文件核對；關閉結果後不會保存。'; root.append(note);
-  if (extraction.policies.length > 1) { const count = document.createElement('h3'); count.textContent = `已識別 ${extraction.policies.length} 份保單`; root.append(count); }
+  { const count = document.createElement('h3'); count.textContent = `已識別 ${extraction.policies.length} 份保單`; root.append(count); }
   addExtractionList(root, '文件警告', extraction.documentWarnings);
   const cards = document.createElement('div'); cards.className = 'extraction-policy-cards'; extraction.policies.forEach((policy, index) => cards.append(policySummaryCard(policy, productMatches[index], index, extraction.policies.length > 1 ? () => showPolicyDetail(extraction, productMatches, index) : null))); root.append(cards);
   if (extraction.policies.length === 1) { const detail = document.createElement('div'); detail.className = 'extraction-policy-detail'; policyDetailContent(detail, extraction.policies[0], productMatches[0]); root.append(detail); }
@@ -101,7 +102,36 @@ function showPolicyInspect(policy) { if (!policy) return; const masked = policy.
 async function aiIntake() {
   showModal('AI 加入保單', '只讀測試模式：PDF / JPEG / PNG / WEBP 只作今次只讀測試，原始文件不會保存。每次只讀取 1 個文件，最大 ' + (MAX_DOCUMENT_BYTES / (1024 * 1024)) + ' MB。AI 抽取結果只留在今次瀏覽器記憶體，由 Agent 核對後關閉；今次不會寫入 CRM、IndexedDB 或 Official Google Sheet。Official Product Registry 會按每份保單的 Insurer + Product Name + Product Version 顯示 exact / candidate / none。', '<button class="ava-button ava-button--secondary" id="choosePolicyFileBtn" type="button">選擇 PDF / 圖片</button><p class="ava-support">流程：1. 選擇 PDF / 圖片 → 2. AI 正在讀取文件 → 3. 顯示抽取結果 → 4. 由 Agent 核對</p>');
   policyPickerCleanup?.(); const input = $('policyFile'); input.value = '';
-  policyPickerCleanup = attachDocumentPicker({ trigger: $('choosePolicyFileBtn'), input, onFile: async (file) => { policyPickerCleanup?.(); policyPickerCleanup = null; input.value = ''; showModal('AI 正在讀取文件', '文件只會暫時送往 CRM GAS 供今次 Gemini 讀取，請稍候。'); try { const extraction = await extractPolicyDocumentFromFile(file); const productMatches = resolvePolicyMatches(extraction, state.registry?.['產品資料'] || [], resolveProductMatch); showPolicyExtractionResult(extraction, productMatches); } catch (error) { showModal('AI文件讀取未完成', clientExtractionErrorMessage(error), '<p class="blocked-note">原始文件沒有保存；請確認文件類型、大小及清晰度後再試。</p>'); } } });
+  policyPickerCleanup = attachDocumentPicker({ trigger: $('choosePolicyFileBtn'), input, onFile: async (file) => {
+    if (extractionRequest) return;
+    policyPickerCleanup?.(); policyPickerCleanup = null; input.value = '';
+    const request = { controller: new AbortController(), started: Date.now(), timedOut: false, timer: null, clock: null };
+    extractionRequest = request;
+    showModal('AI 文件讀取中', '正在驗證文件…', '<progress aria-label="文件驗證及 AI 讀取進度"></progress><p id="extractionStatus" role="status" aria-live="polite">正在驗證文件…</p><p id="extractionElapsed"></p><button class="ava-button ava-button--secondary" type="button" id="cancelExtractionBtn">取消讀取</button>');
+    $('cancelExtractionBtn').onclick = closeExtractionTest;
+    request.clock = setInterval(() => { if (extractionRequest === request && $('extractionElapsed')) $('extractionElapsed').textContent = `已用時間：${Math.floor((Date.now() - request.started) / 1000)} 秒`; }, 1000);
+    request.timer = setTimeout(() => {
+      if (extractionRequest !== request) return;
+      request.timedOut = true; request.controller.abort(); clearInterval(request.clock); extractionRequest = null;
+      showModal('AI 文件讀取未完成', '等候時間過長，請稍後再試。', '<p class="blocked-note">原始文件沒有保存。</p>');
+    }, 120000);
+    try {
+      const extraction = await extractPolicyDocumentFromFile(file, { signal: request.controller.signal, onStage: (stage) => {
+        if (extractionRequest !== request) return;
+        $('extractionStatus').textContent = stage === 'validating' ? '正在驗證文件…' : stage === 'completed' ? '讀取完成，準備供你核對。' : '正在傳送文件或由 AI 分析；目前無法量度進度。';
+      } });
+      if (extractionRequest !== request || request.controller.signal.aborted) return;
+      const productMatches = resolvePolicyMatches(extraction, state.registry?.['產品資料'] || [], resolveProductMatch);
+      showPolicyExtractionResult(extraction, productMatches);
+    } catch (error) {
+      if (extractionRequest !== request) return;
+      if (request.controller.signal.aborted && !request.timedOut) return;
+      showModal('AI 文件讀取未完成', request.timedOut ? '等候時間過長，請稍後再試。' : clientExtractionErrorMessage(error), '<p class="blocked-note">原始文件沒有保存；請確認文件類型、大小及清晰度後再試。</p>');
+    } finally {
+      clearTimeout(request.timer); clearInterval(request.clock);
+      if (extractionRequest === request) extractionRequest = null;
+    }
+  } });
 }
 function manualPolicy() { showModal('手動加入保單', 'Manual policy entry contract：Policy、Policy Roles、Benefits 分開保存；policyholder 與 insured person 可為不同 People。正式保存前仍需確認。'); }
 function deviceTransfer() { showModal('裝置轉移', 'Generate QR Code / Scan QR Code 的 UI contract 已保留，但安全 transfer backend 尚未由 AVA Platform 提供，因此實際 transfer：BLOCKED。QR 絕不放入 raw customer data。', `<div class="transfer-actions"><button class="ava-button ava-button--secondary" id="generateQrBtn">Generate QR Code</button><button class="ava-button ava-button--secondary" id="scanQrBtn">Scan QR Code</button></div><p class="blocked-note">Pointer contract（不含客戶資料）：${createDeviceTransferPointer()}</p>`); $('generateQrBtn').onclick = () => showModal('Generate QR Code · BLOCKED', '待 Mother Platform secure transfer service 接通；目前不產生假 QR。'); $('scanQrBtn').onclick = () => showModal('Scan QR Code · BLOCKED', '待 Mother Platform secure transfer service 接通；目前不讀取未知資料。'); }
@@ -114,7 +144,7 @@ if (entryMode === 'admin') {
     if (!result.authorized) console.info('[AVA-CRM] Admin entry failed closed:', result.reason);
   }).catch((error) => console.warn('[AVA-CRM] Admin launch failed closed:', error));
 } else {
-  $('modalClose').onclick = closeExtractionTest; $('addCustomerBtn').onclick = addCustomer; $('customerSearch').oninput = searchHouseholds; $('customerSelect').onchange = selectHousehold; $('insuredSelect').onchange = selectInsured; $('aiPolicyBtn').onclick = aiIntake; $('manualPolicyBtn').onclick = manualPolicy; $('deviceTransferFooter').onclick = deviceTransfer; $('backupDataBtn').onclick = requestDataFileLocation; $('restoreDataBtn').onclick = openRestoreFilePicker; $('startReviewBtn').onclick = startSession; $('sessionBackControl').onclick = () => state.sessionStep === 0 ? endSession() : previousStep(); $('editFrontstageBtn').onclick = enterUserEditMode; $('previewFrontstageBtn').onclick = () => setFrontstageMode('preview'); $('saveFrontstageBtn').onclick = saveFrontstage; $('cancelFrontstageBtn').onclick = () => { setFrontstageMode('use'); $('userModeBar').hidden = true; };
+  $('modalClose').onclick = closeExtractionTest; modal.addEventListener('cancel', (event) => { event.preventDefault(); closeExtractionTest(); }); $('addCustomerBtn').onclick = addCustomer; $('customerSearch').oninput = searchHouseholds; $('customerSelect').onchange = selectHousehold; $('insuredSelect').onchange = selectInsured; $('aiPolicyBtn').onclick = aiIntake; $('manualPolicyBtn').onclick = manualPolicy; $('deviceTransferFooter').onclick = deviceTransfer; $('backupDataBtn').onclick = requestDataFileLocation; $('restoreDataBtn').onclick = openRestoreFilePicker; $('startReviewBtn').onclick = startSession; $('sessionBackControl').onclick = () => state.sessionStep === 0 ? endSession() : previousStep(); $('editFrontstageBtn').onclick = enterUserEditMode; $('previewFrontstageBtn').onclick = () => setFrontstageMode('preview'); $('saveFrontstageBtn').onclick = saveFrontstage; $('cancelFrontstageBtn').onclick = () => { setFrontstageMode('use'); $('userModeBar').hidden = true; };
   document.querySelectorAll('.session-next').forEach((button) => button.addEventListener('click', nextStep)); document.querySelectorAll('.perception-option').forEach((button) => button.addEventListener('click', choosePerception)); document.querySelectorAll('.priority-choice').forEach((button) => button.addEventListener('click', choosePriority)); document.querySelectorAll('.category-tab').forEach((button) => button.addEventListener('click', selectCategory)); document.querySelectorAll('.retirement-choice').forEach((button) => button.addEventListener('click', chooseRetirement));
   loadAppVersion();
   openUserDatabase().then(async (db) => { state.db = db; setStorageStatus(db ? '本機已就緒' : 'IndexedDB：BLOCKED'); await loadFrontstageOverrides(); await loadHouseholds(); if (canEditFrontstage(entryMode)) enterUserEditMode(); }).catch(() => { setStorageStatus('IndexedDB：BLOCKED'); if (canEditFrontstage(entryMode)) enterUserEditMode(); });
