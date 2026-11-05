@@ -1,7 +1,10 @@
-// The worker script is the deployment identity. The cache name stays stable
-// so a release never needs a manually maintained per-release cache/version.
-const CACHE_NAME = 'ava-crm-shell';
-const CACHE_PREFIX = 'ava-crm-shell';
+// package.json is the canonical release source. The worker derives a
+// deterministic cache identity from it so formal releases cannot retain the
+// previous App Shell as the active cache.
+const CACHE_PREFIX = 'ava-crm-shell-';
+const LEGACY_CACHE_NAME = 'ava-crm-shell';
+const FALLBACK_CACHE_NAME = 'ava-crm-shell-fallback';
+let releaseCacheNamePromise;
 const APP_BASE_PATH = new URL('./', self.location.href).pathname;
 const APP_SHELL = [
   './',
@@ -18,6 +21,28 @@ const APP_SHELL = [
   './sw.js'
 ];
 
+async function getReleaseCacheName() {
+  if (!releaseCacheNamePromise) {
+    releaseCacheNamePromise = fetch('./package.json', { cache: 'no-store' })
+      .then((response) => {
+        if (!response.ok) throw new Error(`Release manifest request failed: ${response.status}`);
+        return response.json();
+      })
+      .then((manifest) => {
+        const version = String(manifest?.version || '').trim();
+        if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error('Release version is invalid');
+        return `${CACHE_PREFIX}${version}`;
+      })
+      .catch((error) => { releaseCacheNamePromise = undefined; throw error; });
+  }
+  return releaseCacheNamePromise;
+}
+
+async function openReleaseCache({ allowFallback = true } = {}) {
+  try { return await caches.open(await getReleaseCacheName()); }
+  catch (error) { if (!allowFallback) throw error; return caches.open(FALLBACK_CACHE_NAME); }
+}
+
 function isOwnedUrl(url) {
   return url.origin === self.location.origin && url.pathname.startsWith(APP_BASE_PATH);
 }
@@ -33,7 +58,7 @@ async function networkFirst(request, fallbackRequest = request) {
     const response = await fetch(request, { cache: 'no-store' });
     if (!response.ok) throw new Error(`Shell request failed: ${response.status}`);
     if (response.ok && response.type === 'basic') {
-      const cache = await caches.open(CACHE_NAME);
+      const cache = await openReleaseCache();
       await cache.put(request, response.clone());
     }
     return response;
@@ -45,7 +70,8 @@ async function networkFirst(request, fallbackRequest = request) {
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME)
+    getReleaseCacheName()
+      .then((cacheName) => caches.open(cacheName))
       .then((cache) => cache.addAll(APP_SHELL))
       .then(() => self.skipWaiting())
   );
@@ -53,12 +79,15 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys()
-      .then((names) => Promise.all(
+    getReleaseCacheName()
+      .then((currentCacheName) => caches.keys().then((names) => Promise.all(
         names
-          .filter((name) => name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME)
+          .filter((name) => name === LEGACY_CACHE_NAME || (name.startsWith(CACHE_PREFIX) && name !== currentCacheName))
           .map((name) => caches.delete(name))
-      ))
+      )))
+      // If the release manifest is temporarily unavailable, preserve old
+      // caches so offline operation remains safe; the next startup retries.
+      .catch(() => undefined)
       .then(() => self.clients.claim())
   );
 });
@@ -78,7 +107,7 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     caches.match(request).then((cached) => cached || fetch(request).then((response) => {
       if (response.ok && response.type === 'basic') {
-        event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.put(request, response.clone())));
+        event.waitUntil(openReleaseCache().then((cache) => cache.put(request, response.clone())));
       }
       return response;
     }).catch(() => Response.error()))
