@@ -22,6 +22,9 @@ test('entry mode keeps User-only Frontstage editing out of Frontend and Admin', 
   const app = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
   assert.match(app, /if \(canEditFrontstage\(entryMode\)\) enterUserEditMode\(\)/);
   assert.match(app, /\$\('editFrontstageBtn'\)\.hidden = !canEditFrontstage\(entryMode\)/);
+  assert.match(app, /function enterUserEditMode\(\) \{ if \(!canEditFrontstage\(entryMode\)\) return;/);
+  const css = fs.readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+  assert.match(css, /\[hidden\]\s*\{\s*display:\s*none\s*!important\s*;/);
 });
 
 test('Return to AVA uses the verified platform destination and surface contract', () => {

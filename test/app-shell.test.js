@@ -57,7 +57,7 @@ function loadWorker({ cacheNames = [], packageVersion = packageSource.version, f
 }
 
 test('service worker owns only CRM resources and cleans only CRM shell caches', async () => {
-  const activation = loadWorker({ cacheNames: ['ava-crm-shell', 'ava-crm-shell-0.4.1', 'ava-crm-shell-0.5.0', 'ava-platform-shell', 'other-app-shell'] });
+  const activation = loadWorker({ cacheNames: ['ava-crm-shell', 'ava-crm-shell-0.4.1', 'ava-crm-shell-0.5.1', 'ava-platform-shell', 'other-app-shell'] });
   await new Promise((resolve) => activation.listeners.activate({ waitUntil: resolve }));
   assert.deepEqual(activation.deleted, ['ava-crm-shell', 'ava-crm-shell-0.4.1']);
 });
@@ -150,7 +150,7 @@ test('update lifecycle never clears CRM user storage', () => {
 });
 
 test('release contract uses package.json for the visible version and startup update check', () => {
-  assert.equal(packageSource.version, '0.5.0');
+  assert.equal(packageSource.version, '0.5.1');
   assert.match(appSource, /fetch\('\.\/package\.json', \{ cache: 'no-store' \}\)/);
   assert.match(appSource, /registerAppShellUpdate\(\)\.catch/);
   assert.match(registrationSource, /registration\.update\(\)/);
