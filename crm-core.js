@@ -68,3 +68,71 @@ export async function restoreUserLayer(db, payload) {
 
 export async function saveUserLayerMutation({ db, storeName, value, fileHandle, exportFn = exportUserLayer, saveFn = saveLocal }) { const saved = await saveFn(db, storeName, value); if (!saved) return { saved: false, fileSync: 'unavailable' }; if (!fileHandle) return { saved: true, fileSync: 'pending' }; try { const writable = await fileHandle.createWritable(); await writable.write(JSON.stringify(await exportFn(db), null, 2)); await writable.close(); return { saved: true, fileSync: 'synced' }; } catch { return { saved: true, fileSync: 'unavailable' }; } }
 export async function loadOfficialRegistry(fetchImpl = fetch, storage = localStorage) { const cacheKey = 'ava-crm-official-registry-v3'; try { const response = await fetchImpl(OFFICIAL_GAS_ENDPOINT, { headers: { Accept: 'application/json' } }); if (!response.ok) throw new Error(`Official registry request failed: ${response.status}`); const payload = await response.json(); storage.setItem(cacheKey, JSON.stringify({ savedAt: new Date().toISOString(), payload })); return { source: 'official', payload }; } catch { try { const cached = JSON.parse(storage.getItem(cacheKey) || 'null'); if (cached?.payload) return { source: 'official-cache', payload: cached.payload }; } catch { /* safe fallback */ } return { source: 'built-in-fallback', payload: emptyOfficialRegistry() }; } }
+
+// Confirmed policy groups are written in a single transaction. No extraction
+// payload or original document is accepted by this interface.
+export function preparePolicyGroup(input, makeId = () => crypto.randomUUID()) {
+  const text = (v) => String(v ?? '').trim();
+  const amount = (v, label) => {
+    if (v == null || String(v).trim() === '') return null;
+    const value = Number(String(v).replace(/,/g, ''));
+    if (!Number.isFinite(value) || value < 0) throw new Error(`${label}無效`);
+    return value;
+  };
+  const householdId = text(input.householdId), holder = text(input.policyHolderId);
+  const insured = [...new Set((input.insuredPersonIds || []).map(text).filter(Boolean))];
+  const insurer = text(input.insurer), productName = text(input.productName), policyNumber = text(input.policyNumber);
+  if (!householdId || !holder || !insured.length || !insurer || !productName || !policyNumber) throw new Error('請填妥客戶、持有人、被保人、保險公司、產品及保單號碼');
+  const id = makeId(), now = new Date().toISOString();
+  const policy = { id, householdId, policyHolderId: holder, insurer, productName, productVersion: text(input.productVersion), policyNumber,
+    status: text(input.status), issueDate: text(input.issueDate), effectiveDate: text(input.effectiveDate),
+    premium: amount(input.premium, '保費'), currency: text(input.currency).toUpperCase(), paymentFrequency: text(input.paymentFrequency),
+    paymentTerm: text(input.paymentTerm), coverageTerm: text(input.coverageTerm), sumAssured: amount(input.sumAssured, '保障額'),
+    riders: (input.riders || []).map(text).filter(Boolean), createdAt: now };
+  const roles = insured.map((personId) => ({ id: makeId(), policyId: id, personId, policyHolderId: holder, insuredPersonId: personId, createdAt: now }));
+  const benefits = (input.benefits || []).map((b) => {
+    const personId = text(b.insuredPersonId), category = text(b.primaryCategory), type = text(b.benefitType);
+    if (!insured.includes(personId) || !category || !type) throw new Error('保障項目需要指定被保人、分類及名稱');
+    return createBenefit({ id: makeId(), policyId: id, insuredPersonId: personId, primaryCategory: category, benefitCategory: category,
+      benefitType: type, amount: amount(b.amount, '保障金額'), limit: text(b.limit), currency: text(b.currency).toUpperCase(), unit: text(b.unit), benefitForm: text(b.benefitForm), metadata: { classificationConfirmed: true }, createdAt: now });
+  });
+  const values = (input.values || []).map((v) => {
+    const personId = text(v.insuredPersonId), valueType = text(v.valueType);
+    if (!insured.includes(personId) || !['current_policy_cash_value', 'guaranteed_value', 'non_guaranteed_value'].includes(valueType)) throw new Error('現金價值需要指定被保人及種類');
+    const n = amount(v.amount, '現金價值'); if (n === null) throw new Error('請輸入現金價值');
+    return { id: makeId(), policyId: id, insuredPersonId: personId, valueType, amount: n, currency: text(v.currency).toUpperCase(), yearOrAge: text(v.yearOrAge), createdAt: now };
+  });
+  return { policy, roles, benefits, values, personIds: [...new Set([holder, ...insured])] };
+}
+
+export function policyDuplicateKey(policy) {
+  const normalize = (v) => String(v || '').normalize('NFKC').trim().toLocaleLowerCase().replace(/\s+/g, '');
+  return normalize(policy.insurer) && normalize(policy.policyNumber) ? `${normalize(policy.insurer)}\u0000${normalize(policy.policyNumber)}` : '';
+}
+
+export async function saveConfirmedPolicy(db, group) {
+  if (!db || !group?.policy || !group.roles?.length) throw new Error('本機資料庫或保單資料不可用');
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(['households', 'people', 'policies', 'policyRoles', 'benefits', 'policyValues'], 'readwrite');
+    let reason = null, household, people, policies, remaining = 3;
+    const fail = (message) => { reason = new Error(message); try { tx.abort(); } catch (_) {} };
+    tx.oncomplete = () => resolve(group.policy.id);
+    tx.onabort = tx.onerror = () => reject(reason || tx.error || new Error('本機保存失敗'));
+    const check = () => {
+      if (--remaining) return;
+      try {
+        if (!household || group.personIds.some((id) => !people.some((person) => person.id === id && person.householdId === household.id))) return fail('客戶或人物關係無效');
+        const key = policyDuplicateKey(group.policy);
+        const matches = policies.filter((p) => key && policyDuplicateKey(p) === key);
+        if (matches.length) return fail(matches.some((p) => p.householdId === household.id) ? '偵測到相同保險公司及保單號碼；請查看現有保單' : '其他客戶可能已有相同保單；請先核對，沒有自動連結');
+        tx.objectStore('policies').add(group.policy);
+        for (const role of group.roles) tx.objectStore('policyRoles').add(role);
+        for (const benefit of group.benefits) tx.objectStore('benefits').add(benefit);
+        for (const value of group.values) tx.objectStore('policyValues').add(value);
+      } catch (error) { reason = error; try { tx.abort(); } catch (_) {} }
+    };
+    const h = tx.objectStore('households').get(group.policy.householdId); h.onsuccess = () => { household = h.result; check(); };
+    const p = tx.objectStore('people').getAll(); p.onsuccess = () => { people = p.result; check(); };
+    const q = tx.objectStore('policies').getAll(); q.onsuccess = () => { policies = q.result; check(); };
+  });
+}
