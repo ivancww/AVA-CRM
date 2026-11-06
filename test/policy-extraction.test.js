@@ -55,6 +55,29 @@ test('frontend posts one temporary document and accepts only a successful struct
   assert.doesNotMatch(call.options.body, /GEMINI_API_KEY|GEMINI_MODEL|prompt/i);
 });
 
+test('progress uses indeterminate transfer/analysis and completes only after a valid response', async () => {
+  const stages = [];
+  await extractPolicyDocumentFromFile(fakeFile(), { onStage: (stage) => stages.push(stage), fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ success: true, data: { policies: [{ policyNumber: 'P1' }] } }) }) });
+  assert.deepEqual(stages, ['validating', 'transferring-or-analyzing', 'completed']);
+});
+
+test('aborting before file reading completes prevents the network request', async () => {
+  const controller = new AbortController(); let finishRead; let sent = false;
+  const file = { ...fakeFile(), arrayBuffer: () => new Promise((resolve) => { finishRead = resolve; }) };
+  const pending = extractPolicyDocumentFromFile(file, { signal: controller.signal, fetchImpl: async () => { sent = true; } });
+  controller.abort(); finishRead(new Uint8Array([1]).buffer);
+  await assert.rejects(pending, { name: 'AbortError' });
+  assert.equal(sent, false);
+});
+
+test('cancelled requests do not return even if transport resolves after abort', async () => {
+  const controller = new AbortController(); let finishFetch;
+  const pending = extractPolicyDocumentFromFile(fakeFile(), { signal: controller.signal, fetchImpl: () => new Promise((resolve) => { finishFetch = resolve; }) });
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.abort(); finishFetch({ ok: true, status: 200, json: async () => ({ success: true, data: { policies: [{ policyNumber: 'P1' }] } }) });
+  await assert.rejects(pending, { name: 'AbortError' });
+});
+
 test('one-policy and three-policy document results remain independently addressable', () => {
   const one = normalizeExtractionResult({ documentType: '保單', policies: [{ policyNumber: 'P-001' }] });
   assert.equal(one.policies.length, 1);
@@ -105,23 +128,20 @@ test('GAS action validates input and does not route extraction through Official 
   assert.doesNotMatch(appSource, /GEMINI_API_KEY|GEMINI_MODEL/);
 });
 
-test('frontend AI Intake is read-only and uses the existing registry resolver', () => {
+test('AI extraction remains provisional and matching is independent', () => {
   const intakeBlock = appSource.slice(appSource.indexOf('async function aiIntake'), appSource.indexOf('function manualPolicy'));
   assert.match(intakeBlock, /extractPolicyDocumentFromFile/);
   assert.match(intakeBlock, /resolvePolicyMatches/);
-  assert.match(intakeBlock, /只讀測試模式/);
-  assert.match(appSource, /關閉測試結果/);
-  assert.doesNotMatch(intakeBlock, /saveMutation|intakeDrafts|replaceOfficialArea|Save to CRM/);
-  assert.match(appSource, /已識別 \$\{extraction\.policies\.length\} 份保單/);
+  assert.doesNotMatch(intakeBlock, /saveConfirmedPolicy|saveMutation|replaceOfficialArea/);
+  assert.match(appSource, /已識別 \${extraction\.policies\.length} 份保單/);
   assert.match(appSource, /extraction\.policies\.forEach/);
-  assert.match(appSource, /maskPolicyNumber/);
 });
 
-test('read-only result stays in memory and closing clears it without raw-file persistence', () => {
+test('closing clears provisional extraction and no document is persisted', () => {
   assert.match(appSource, /state\.readOnlyExtraction = extraction/);
-  assert.match(appSource, /function closeExtractionTest\(\) \{ state\.readOnlyExtraction = null/);
+  assert.match(appSource, /state\.readOnlyExtraction = null/);
   const extractionBlock = appSource.slice(appSource.indexOf('async function aiIntake'), appSource.indexOf('function manualPolicy'));
-  assert.doesNotMatch(extractionBlock, /localStorage|sessionStorage|indexedDB|saveMutation|intakeDrafts/);
+  assert.doesNotMatch(extractionBlock, /localStorage|sessionStorage|indexedDB|saveMutation/);
   assert.doesNotMatch(clientSource, /localStorage|sessionStorage|indexedDB/);
 });
 

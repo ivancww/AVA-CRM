@@ -11,6 +11,7 @@ const APP_SHELL = [
   './index.html',
   './app.js',
   './policy-extraction.js',
+  './policy-editor.js',
   './admin-ui.js',
   './ava-entry.js',
   './crm-core.js',
