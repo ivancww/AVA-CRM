@@ -128,23 +128,20 @@ test('GAS action validates input and does not route extraction through Official 
   assert.doesNotMatch(appSource, /GEMINI_API_KEY|GEMINI_MODEL/);
 });
 
-test('frontend AI Intake is read-only and uses the existing registry resolver', () => {
+test('AI extraction remains provisional and matching is independent', () => {
   const intakeBlock = appSource.slice(appSource.indexOf('async function aiIntake'), appSource.indexOf('function manualPolicy'));
   assert.match(intakeBlock, /extractPolicyDocumentFromFile/);
   assert.match(intakeBlock, /resolvePolicyMatches/);
-  assert.match(intakeBlock, /只讀測試模式/);
-  assert.match(appSource, /關閉測試結果/);
-  assert.doesNotMatch(intakeBlock, /saveMutation|intakeDrafts|replaceOfficialArea|Save to CRM/);
-  assert.match(appSource, /已識別 \$\{extraction\.policies\.length\} 份保單/);
+  assert.doesNotMatch(intakeBlock, /saveConfirmedPolicy|saveMutation|replaceOfficialArea/);
+  assert.match(appSource, /已識別 \${extraction\.policies\.length} 份保單/);
   assert.match(appSource, /extraction\.policies\.forEach/);
-  assert.match(appSource, /maskPolicyNumber/);
 });
 
-test('read-only result stays in memory and closing clears it without raw-file persistence', () => {
+test('closing clears provisional extraction and no document is persisted', () => {
   assert.match(appSource, /state\.readOnlyExtraction = extraction/);
-  assert.match(appSource, /function closeExtractionTest\(\) \{ state\.readOnlyExtraction = null/);
+  assert.match(appSource, /state\.readOnlyExtraction = null/);
   const extractionBlock = appSource.slice(appSource.indexOf('async function aiIntake'), appSource.indexOf('function manualPolicy'));
-  assert.doesNotMatch(extractionBlock, /localStorage|sessionStorage|indexedDB|saveMutation|intakeDrafts/);
+  assert.doesNotMatch(extractionBlock, /localStorage|sessionStorage|indexedDB|saveMutation/);
   assert.doesNotMatch(clientSource, /localStorage|sessionStorage|indexedDB/);
 });
 

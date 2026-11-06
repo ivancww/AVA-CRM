@@ -180,3 +180,13 @@ html,body{max-width:100%;overflow-x:hidden}
 
 
 .visually-hidden{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0 0 0 0)!important;white-space:nowrap!important;border:0!important}
+.policy-editor { display:grid; gap:16px; }
+.policy-form-grid, .policy-repeat { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.policy-editor input:not([type=checkbox]), .policy-editor textarea, .policy-editor select { box-sizing:border-box; width:100%; min-height:44px; padding:8px; font:inherit; border:1px solid var(--ava-color-control-border); border-radius:8px; }
+.policy-editor fieldset, .policy-editor details { min-width:0; padding:12px; border:1px solid var(--ava-color-border); border-radius:8px; }
+.policy-editor summary { cursor:pointer; min-height:44px; }
+.policy-repeat { padding:12px 0; border-bottom:1px solid var(--ava-color-border); }
+.policy-repeat h4 { grid-column:1/-1; margin:0; }
+.policy-actions { display:flex; gap:8px; flex-wrap:wrap; }
+@media (max-width:650px) { .policy-form-grid, .policy-repeat { grid-template-columns:1fr; } }
+.policy-editor fieldset label { display:inline-flex; align-items:center; min-height:44px; margin-right:12px; }
