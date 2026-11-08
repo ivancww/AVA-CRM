@@ -1,0 +1,7 @@
+# CRM registry mapping — v0.5.3 work in progress
+
+The accessible Drive spreadsheet named AVA-CRM has a `產品資料` tab. Its observed header row contains: `保險公司`, `產品名稱`, `產品版本`, `分類`, `保障特點`, `簡單解釋`, `資料狀態`, `啟用`. A sample has `待確認` as its product version and data status. This is insufficient evidence that a particular feature is applicable to a customer's contract. The active production GAS spreadsheet binding has not been independently verified.
+
+A backward-compatible proposal needs verified stable product and contract identifiers, insurer, exact product name, product version or effective-from/effective-to dates, main/rider identity, medical plan/tier, insured benefit category, protection scope, annual deductible, annual reimbursement limit, lifetime limit, limit currency, limit conditions, eligibility dates, payout interaction, sources, verification status and enabled status. Concrete proposed keys: `product_id`, `contract_id`, `contract_type`, `applicable_from`, `applicable_to`, `medical_tier`, `annual_deductible`, `annual_limit`, `lifetime_limit`, `limit_currency`, `limit_conditions`, `eligibility_from`, `eligibility_to`, `payout_relationship`, `source_reference`, `verified_status`. Values require product-owner-approved authoritative product terms; blank or unverified fields are unknown. No production schema change is made by this PR.
+
+The existing registry matching is not yet adequate for contract/tier-level auto-population; no new automatic benefit or limit population is added here.

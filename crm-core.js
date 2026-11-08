@@ -107,7 +107,13 @@ export function preparePolicyGroup(input, makeId = () => crypto.randomUUID()) {
     status: text(input.status), issueDate: date(input.issueDate, '簽發日期'), effectiveDate: date(input.effectiveDate, '生效日期'),
     premium, currency, paymentFrequency: frequency,
     paymentTerm: text(input.paymentTerm), coverageTerm: text(input.coverageTerm), sumAssured: amount(input.sumAssured, '保障額'), sumAssuredCurrency: text(input.sumAssuredCurrency).toUpperCase(),
-    riders: (input.riders || []).map(text).filter(Boolean), createdAt: now };
+    protectionScope: text(input.protectionScope),
+    riders: (input.riders || []).map(text).filter(Boolean),
+    contracts: (input.contracts || []).map((c, index) => {
+      const personId = text(c.insuredPersonId);
+      if (personId && !insured.includes(personId)) throw new Error('附加契約受保人不屬於此保單');
+      return { contractId: text(c.contractId) || `rider-${index+1}`, name: text(c.name), insuredPersonId: personId, category: text(c.category), premium: amount(c.premium,'附加契約保費'), premiumCurrency: text(c.premiumCurrency).toUpperCase(), paymentFrequency: text(c.paymentFrequency), sumAssured: amount(c.sumAssured,'附加契約保障額'), currency: text(c.currency).toUpperCase(), effectiveDate: date(c.effectiveDate,'附加契約生效日期'), paidUpDate: date(c.paidUpDate,'附加契約繳清日期'), paymentTerm: text(c.paymentTerm), coverageTerm: text(c.coverageTerm), protectionScope: text(c.protectionScope), annualDeductible: text(c.annualDeductible), annualLimit: text(c.annualLimit), lifetimeLimit: text(c.lifetimeLimit), source: text(c.source) };
+    }), hiddenContractualData: Array.isArray(input.hiddenContractualData) ? input.hiddenContractualData.map(b => ({ name:text(b.name), category:text(b.category), notes:text(b.notes), amount:amount(b.amount,'保障金額'), currency:text(b.currency), limit:text(b.limit) })) : [], createdAt: now };
   const roles = insured.map((personId) => ({ id: makeId(), policyId: id, personId, policyHolderId: holder, insuredPersonId: personId, createdAt: now }));
   const benefits = (input.benefits || []).map((b) => {
     const personId = text(b.insuredPersonId), category = text(b.primaryCategory), type = text(b.benefitType);
@@ -115,11 +121,11 @@ export function preparePolicyGroup(input, makeId = () => crypto.randomUUID()) {
     return createBenefit({ id: makeId(), policyId: id, insuredPersonId: personId, primaryCategory: category, benefitCategory: category,
       benefitType: type, amount: amount(b.amount, '保障金額'), limit: text(b.limit), currency: text(b.currency).toUpperCase(), unit: text(b.unit), benefitForm: text(b.benefitForm), metadata: { classificationConfirmed: true, notes: text(b.notes) }, createdAt: now });
   });
-  const values = (input.values || []).map((v) => {
+  const values = (input.values || []).filter(v => v.amount != null && String(v.amount).trim() !== '').map((v) => {
     const personId = text(v.insuredPersonId), valueType = text(v.valueType);
     if (!insured.includes(personId) || !['current_policy_cash_value', 'guaranteed_value', 'non_guaranteed_value', 'cash_reserve', 'annual_dividend', 'terminal_dividend', 'cash_value', 'reversionary_bonus', 'net_policy_value'].includes(valueType)) throw new Error('現金價值需要指定被保人及種類');
     const n = amount(v.amount, '現金價值'); if (n === null) throw new Error('請輸入現金價值');
-    return { id: makeId(), policyId: id, insuredPersonId: personId, valueType, amount: n, currency: text(v.currency).toUpperCase(), yearOrAge: text(v.yearOrAge), valuationDate: date(v.valuationDate, '估值日期'), verified: v.verified === true, conditions: text(v.conditions), includesComponents: Array.isArray(v.includesComponents) ? v.includesComponents.map(text).filter(Boolean) : [], createdAt: now };
+    return { id: makeId(), policyId: id, insuredPersonId: personId, valueType, amount: n, currency: text(v.currency).toUpperCase(), yearOrAge: text(v.yearOrAge), source: text(v.source) || 'agent_confirmed', valuationDate: date(v.valuationDate, '估值日期'), verified: v.verified === true, conditions: text(v.conditions), includesComponents: Array.isArray(v.includesComponents) ? v.includesComponents.map(text).filter(Boolean) : [], createdAt: now };
   });
   const newPeople = (input.newPeople || []).map((person) => ({ id: text(person.id), householdId, name: text(person.name), relationship: text(person.relationship), createdAt: now }));
   if (newPeople.some((person) => !person.id || !person.name || !person.relationship || !insured.includes(person.id))) throw new Error('新增受保人資料不完整');

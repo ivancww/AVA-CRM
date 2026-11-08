@@ -80,3 +80,9 @@ test('new insured person joins policy atomically and rolls back on failure', asy
 test('new insured duplicate name is rejected before any write', async () => {
  const db=await fresh();const i=input('DUP');i.insuredPersonIds=['insured','new-person'];i.newPeople=[{id:'new-person',name:' INSURED ',relationship:'家人'}];await assert.rejects(saveConfirmedPolicy(db,preparePolicyGroup(i)),/重複/);const data=await exportUserLayer(db);assert.equal(data.data.policies.length,0);assert.equal(data.data.people.length,2);db.close();
 });
+test('structured rider details and value source metadata survive local save and backup restore', async () => {
+ const db=await fresh(); const i=input('STRUCT');i.contracts=[{contractId:'r1',name:'Medical rider',insuredPersonId:'insured',category:'medical',premium:25,premiumCurrency:'HKD',sumAssured:1000,currency:'HKD',effectiveDate:'2026-01-01',annualDeductible:'100',annualLimit:'5000',lifetimeLimit:'not verified',source:'pdf'}];
+ i.values.push({insuredPersonId:'insured',valueType:'annual_dividend',amount:0,currency:'HKD',valuationDate:'2026-01-01',verified:true,includesComponents:['cash_value']});
+ await saveConfirmedPolicy(db,preparePolicyGroup(i));const backup=await exportUserLayer(db);await restoreUserLayer(db,backup);const data=await loadInsuredPersonData(db,'insured');assert.equal(data.policies[0].contracts[0].annualLimit,'5000');assert.equal(data.policies[0].contracts[0].insuredPersonId,'insured');assert.equal(data.values.find(v=>v.valueType==='annual_dividend').amount,0);assert.deepEqual(data.values.find(v=>v.valueType==='annual_dividend').includesComponents,['cash_value']);db.close();
+});
+test('rider cannot be attributed to an unrelated insured person',()=>{const i=input('X');i.contracts=[{name:'Medical',insuredPersonId:'someone-else'}];assert.throws(()=>preparePolicyGroup(i),/受保人/);});
