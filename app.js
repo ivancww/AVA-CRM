@@ -107,7 +107,7 @@ function renderReview() { const list = $('policyReviewList'); list.innerHTML = s
 function renderResources() {
   const values=state.selectedData.values;
   const labels={current_policy_cash_value:'現時保單價值',fund_current_value:'基金價值',cash_reserve:'現金儲備戶口',annual_dividend:'週年紅利',terminal_dividend:'終期紅利',cash_value:'現金價值',reversionary_bonus:'復歸紅利',guaranteed_value:'保證價值',non_guaranteed_value:'非保證價值'};
-  const format = types => { const rows=values.filter(v=>types.includes(v.valueType) && v.amount != null && Number.isFinite(Number(v.amount))); if(!rows.length)return '未有'; return rows.map(v=>`${labels[v.valueType]}：${v.currency || '貨幣待確認'} ${Number(v.amount).toLocaleString()}${v.valuationDate ? `（${v.valuationDate}）` : ''}`).join('；'); };
+  const format = types => { const rows=values.filter(v=>types.includes(v.valueType) && v.amount != null && Number.isFinite(Number(v.amount))); if(!rows.length)return '未有'; return rows.map(v=>`${state.selectedData.policies.find(p=>p.id===v.policyId)?.productName || '保單待確認'} · ${labels[v.valueType]}：${v.currency || '貨幣待確認'} ${Number(v.amount).toLocaleString()}${v.valuationDate ? `（${v.valuationDate}）` : ''}`).join('；'); };
   $('resourceCurrent').textContent=format(['current_policy_cash_value','fund_current_value','cash_reserve','annual_dividend','terminal_dividend','cash_value','reversionary_bonus']);
   $('resourceGuaranteed').textContent=format(['guaranteed_value']);$('resourceNonGuaranteed').textContent=format(['non_guaranteed_value']);
 }
@@ -146,7 +146,7 @@ async function aiIntake() {
       } });
       if (extractionRequest !== request || request.controller.signal.aborted) return;
       const productMatches = resolvePolicyMatches(extraction, state.registry?.['產品資料'] || [], resolveProductMatch);
-      intakeDrafts = extraction.policies.map(policy => makePolicyDraft(state.household.id, policy)); approvedPolicies = new Set();
+      intakeDrafts = extraction.policies.map((policy,index) => { const draft=makePolicyDraft(state.household.id, policy); draft.officialProduct=productMatches[index]; return draft; }); approvedPolicies = new Set();
       state.readOnlyExtraction = extraction; openPolicyEditor(intakeDrafts[0], {extraction, productMatches, index:0});
     } catch (error) {
       if (extractionRequest !== request) return;
@@ -168,6 +168,7 @@ function openPolicyEditor(draft, context = null) {
 async function reviewPolicy(draft, errorElement, context) {
   const epoch=policyUiEpoch;
   try {
+    if(context) draft.officialProduct=resolveProductMatch(state.registry?.['產品資料'] || [], draft);
     const group=preparePolicyGroup(draft);
     const duplicates=await findPolicyDuplicates(state.db,group.policy);
     if (epoch !== policyUiEpoch || !modal.open) return;
@@ -179,7 +180,7 @@ async function reviewPolicy(draft, errorElement, context) {
     if (group.newPeople?.length) addExtractionSection(root,'確認新增家庭人物',group.newPeople.map((person,index)=>[`新人物 ${index+1}`,`${person.name} · ${person.relationship}（確認後與保單一併建立）`]));
     addExtractionSection(root,'保障項目',group.benefits.length ? group.benefits.map((b,i)=>[`保障 ${i+1}`,`${personName(b.insuredPersonId)} · ${b.primaryCategory} · ${b.benefitType} · ${extractionValue(b.amount)} ${b.currency} · ${b.limit || ''} ${b.unit || ''} ${b.benefitForm || ''} ${b.metadata?.notes || ''}`]) : [['保障','未有資料']]);
     addExtractionSection(root,'現金價值',group.values.length ? group.values.map((v,i)=>[`價值 ${i+1}`,`${personName(v.insuredPersonId)} · ${v.valueType} · ${v.amount} ${v.currency} · ${v.yearOrAge}`]) : [['價值','未有資料']]);
-    if (context) { const match=resolveProductMatch(state.registry?.['產品資料'] || [],group.policy); addExtractionSection(root,'產品資料庫', [['匹配結果',productMatchLabel(match)]]); }
+    if (context) { const match=resolveProductMatch(state.registry?.['產品資料'] || [],group.policy); addExtractionSection(root,'產品資料庫', [['匹配結果',productMatchLabel(match)],['分類',match.categories],['產品特點',match.officialFeatures],['簡單解釋',match.customerExplanations],['來源','Official 產品資料；適用條款以保單為準']]); }
     if (duplicates.sameHousehold.length) { const warn=document.createElement('p');warn.className='blocked-note';warn.textContent='同一家庭已有相同保險公司及保單號碼，不能新增或覆寫。以下只顯示現有保單的差異。';root.append(warn);const existing=duplicates.sameHousehold[0]; addExtractionSection(root,'同家庭現有保單', [['保險公司',existing.insurer],['產品',existing.productName],['版本',existing.productVersion],['保單號碼',existing.policyNumber],['生效日期',existing.effectiveDate],['保費',existing.premium],['狀態',existing.status]]); const differences=comparePolicy(existing,group.policy);addExtractionSection(root,'現有保單與輸入資料的差異',differences.length ? differences.map(d=>[d.field,`現有：${extractionValue(d.existing)}；新資料：${extractionValue(d.extracted)}`]) : [['差異','沒有可比較的差異']]); }
     let acknowledgement=null;
     if (duplicates.otherHousehold) { const wrap=document.createElement('label');acknowledgement=document.createElement('input');acknowledgement.type='checkbox';wrap.append(acknowledgement,document.createTextNode(' 其他客戶可能有相同保單號碼；我已核對並確認是獨立保單。'));root.append(wrap); }

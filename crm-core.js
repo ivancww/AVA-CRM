@@ -36,27 +36,24 @@ export function accumulatedValueTotal(values = []) {
 }
 
 export function comparePolicy(existing = {}, extracted = {}) { return POLICY_COMPARE_FIELDS.filter((field) => JSON.stringify(existing[field] ?? null) !== JSON.stringify(extracted[field] ?? null)).map((field) => ({ field, existing: existing[field] ?? null, extracted: extracted[field] ?? null })); }
-function hasConfirmedCompatibleVersion(product, version) {
-  const n = normalizeSearchName;
-  if (!version) return false;
-  if (n(product.productVersion) === version) return true;
-  const compatibleVersions = product.compatibleProductVersions || product.productVersionAliases || product.metadata?.compatibleProductVersions || [];
-  return compatibleVersions.some((compatibleVersion) => n(compatibleVersion) === version);
+// Official rows are descriptions, not proof of an individual contract's terms.
+export function matchProduct(products = [], query = {}) {
+  const n = normalizeSearchName, insurer = n(query.insurer), name = n(query.productName);
+  if (!insurer || !name) return {status:'none', candidates:[], requiresConfirmation:true};
+  const rows = products.filter(row => n(row.insurer ?? row['保險公司']) === insurer && n(row.productName ?? row['產品名稱']) === name && !['否','false','0','no'].includes(n(row.enabled ?? row['啟用'] ?? '')));
+  if (!rows.length) return {status:'none', candidates:[], requiresConfirmation:true};
+  return {status:'exact', product:rows[0], rows, requiresConfirmation:false};
 }
-export function matchProduct(products = [], query = {}) { const n = normalizeSearchName; const insurer = n(query.insurer); const product = n(query.productName); const version = n(query.productVersion); const exact = products.find((item) => n(item.insurer) === insurer && n(item.productName) === product && hasConfirmedCompatibleVersion(item, version)); if (exact) return { status: 'exact', product: exact, requiresConfirmation: false }; const candidates = products.filter((item) => n(item.insurer) === insurer && product && meaningfulProductSimilarity(n(item.productName), product)); return candidates.length ? { status: 'candidate', candidates, requiresConfirmation: true } : { status: 'none', candidates: [], requiresConfirmation: true }; }
-export function meaningfulProductSimilarity(left, right) { if (!left || !right) return false; if (left === right || left.includes(right) || right.includes(left)) return true; const leftTokens = new Set(left.split(/[\s·•丨|，,()（）-]+/).filter(Boolean)); const rightTokens = new Set(right.split(/[\s·•丨|，,()（）-]+/).filter(Boolean)); return [...leftTokens].some((token) => token.length >= 2 && rightTokens.has(token)); }
+export function meaningfulProductSimilarity(left, right) { return Boolean(left && right && normalizeSearchName(left) === normalizeSearchName(right)); }
 export function resolveProductMatch(products = [], extracted = {}) {
-  const result = matchProduct(products, extracted);
-  if (result.status === 'exact') {
-    const status = normalizeSearchName(result.product.dataStatus || result.product.verificationStatus || result.product['資料狀態']);
-    const version = normalizeSearchName(extracted.productVersion);
-    const verified = ['verified','confirmed','已核實','已確認'].includes(status) && version && !['待確認','unknown','未確認'].includes(version);
-    if (verified) return { ...result, verifiedFeatures: result.product.features || [], customerExplanations: result.product.customerExplanations || [] };
-    return { status:'candidate', candidates:[result.product], requiresConfirmation:true, candidateFeatures:[], message:'Registry source or product version is not verified.' };
-  }
-  if (result.status === 'candidate') return { ...result, candidateFeatures: [], message: 'Candidate match requires User confirmation.' };
-  return { ...result, candidateFeatures: [], message: 'No verified registry match.' };
+  const result=matchProduct(products,extracted);
+  if(result.status!=='exact') return {...result, officialFeatures:[], verifiedFeatures:[], customerExplanations:[], categories:[]};
+  const distinct = list => [...new Set(list.map(v=>String(v ?? '').trim()).filter(Boolean))];
+  const entries=result.rows.map(row=>({category:String(row.category ?? row['分類'] ?? '').trim(), feature:String(row.feature ?? row['保障特點'] ?? '').trim(), explanation:String(row.explanation ?? row['簡單解釋'] ?? '').trim(), version:String(row.productVersion ?? row['產品版本'] ?? '').trim(), status:String(row.dataStatus ?? row.verificationStatus ?? row['資料狀態'] ?? '').trim(), source:'Official 產品資料'}));
+  const values=key => distinct(entries.map(e=>e[key]));
+  return {...result, entries, categories:values('category'), officialFeatures:distinct(entries.map(e=>e.feature).concat(result.rows.flatMap(row=>Array.isArray(row.features)?row.features:[]))), customerExplanations:distinct(entries.map(e=>e.explanation).concat(result.rows.flatMap(row=>Array.isArray(row.customerExplanations)?row.customerExplanations:[]))), verifiedFeatures:distinct(entries.filter(e=>['verified','confirmed','已核實','已確認'].includes(normalizeSearchName(e.status))).map(e=>e.feature))};
 }
+
 export function createDeviceTransferPointer() { return `ava-crm-transfer:${crypto.randomUUID()}`; }
 export function emptyOfficialRegistry() { return { '保障分類': [], '產品資料': [], 'Review問題': [], '頁面設定': [], '系統設定': [] }; }
 
@@ -119,6 +116,7 @@ export function preparePolicyGroup(input, makeId = () => crypto.randomUUID()) {
     premium, currency, paymentFrequency: frequency,
     paymentTerm: text(input.paymentTerm), coverageTerm: text(input.coverageTerm), sumAssured: amount(input.sumAssured, '保障額'), sumAssuredCurrency: text(input.sumAssuredCurrency).toUpperCase(),
     protectionScope: text(input.protectionScope),
+    officialProductInfo: input.officialProduct?.status === 'exact' ? { source:'Official 產品資料', entries:(input.officialProduct.entries || []).map(e=>({category:text(e.category), feature:text(e.feature), explanation:text(e.explanation), version:text(e.version), status:text(e.status)})) } : null,
     riders: (input.riders || []).map(text).filter(Boolean),
     contracts: (input.contracts || []).map((c, index) => {
       const personId = text(c.insuredPersonId);
