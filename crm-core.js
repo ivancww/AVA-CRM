@@ -123,7 +123,7 @@ export function preparePolicyGroup(input, makeId = () => crypto.randomUUID()) {
     contracts: (input.contracts || []).map((c, index) => {
       const personId = text(c.insuredPersonId);
       if (personId && !insured.includes(personId)) throw new Error('附加契約受保人不屬於此保單');
-      return { contractId: text(c.contractId) || `rider-${index+1}`, name: text(c.name), insuredPersonId: personId, category: text(c.category), premium: amount(c.premium,'附加契約保費'), premiumCurrency: text(c.premiumCurrency).toUpperCase(), paymentFrequency: text(c.paymentFrequency), sumAssured: amount(c.sumAssured,'附加契約保障額'), currency: text(c.currency).toUpperCase(), effectiveDate: date(c.effectiveDate,'附加契約生效日期'), paidUpDate: date(c.paidUpDate,'附加契約繳清日期'), paymentTerm: text(c.paymentTerm), coverageTerm: text(c.coverageTerm), protectionScope: text(c.protectionScope), annualDeductible: text(c.annualDeductible), annualLimit: text(c.annualLimit), lifetimeLimit: text(c.lifetimeLimit), source: text(c.source) };
+      return { contractId: text(c.contractId) || `rider-${index+1}`, name: text(c.name), insuredPersonId: personId, category: text(c.category), premium: amount(c.premium,'附加契約保費'), premiumCurrency: text(c.premiumCurrency).toUpperCase(), paymentFrequency: text(c.paymentFrequency), sumAssured: amount(c.sumAssured,'附加契約保障額'), currency: text(c.currency).toUpperCase(), effectiveDate: date(c.effectiveDate,'附加契約生效日期'), paidUpDate: date(c.paidUpDate,'附加契約繳清日期'), paymentTerm: text(c.paymentTerm), coverageTerm: text(c.coverageTerm), protectionScope: text(c.protectionScope), annualDeductible: text(c.annualDeductible), annualLimit: text(c.annualLimit), lifetimeLimit: text(c.lifetimeLimit), limitsVerified: c.limitsVerified === true, source: text(c.source) };
     }), hiddenContractualData: Array.isArray(input.hiddenContractualData) ? input.hiddenContractualData.map(b => ({ name:text(b.name), category:text(b.category), notes:text(b.notes), amount:amount(b.amount,'保障金額'), currency:text(b.currency), limit:text(b.limit) })) : [], createdAt: now };
   const roles = insured.map((personId) => ({ id: makeId(), policyId: id, personId, policyHolderId: holder, insuredPersonId: personId, createdAt: now }));
   const benefits = (input.benefits || []).map((b) => {
@@ -221,5 +221,5 @@ export function medicalContractsForPerson(policies, personId) {
   if (!personId) return [];
   return (policies || []).flatMap(policy => (policy.contracts || [])
     .filter(contract => contract.insuredPersonId === personId && contract.category === 'medical' && !/免付保費|豁免保費|waiver\s+of\s+premium/i.test(contract.name || ''))
-    .map(contract => ({ policyId: policy.id, policyName: policy.productName, contractId: contract.contractId, name: contract.name })));
+    .map(contract => ({ policyId: policy.id, policyName: policy.productName, contractId: contract.contractId, name: contract.name, ...(contract.limitsVerified === true ? { annualDeductible:contract.annualDeductible, annualLimit:contract.annualLimit, lifetimeLimit:contract.lifetimeLimit } : {}) })));
 }
