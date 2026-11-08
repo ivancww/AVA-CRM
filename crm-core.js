@@ -221,3 +221,25 @@ export function medicalContractsForPerson(policies, personId) {
     .filter(contract => contract.insuredPersonId === personId && contract.category === 'medical' && !/免付保費|豁免保費|waiver\s+of\s+premium/i.test(contract.name || ''))
     .map(contract => ({ policyId: policy.id, policyName: policy.productName, contractId: contract.contractId, name: contract.name, ...(contract.limitsVerified === true ? { annualDeductible:contract.annualDeductible, annualLimit:contract.annualLimit, lifetimeLimit:contract.lifetimeLimit } : {}) })));
 }
+
+// Only evaluate one explicitly verified scenario shared by every displayed benefit.
+export function verifiedCoverageScenario(benefits, personId, category) {
+  const rows = categoryBenefits(benefits.filter(b => b.insuredPersonId === personId), category);
+  if (!personId || !rows.length) return { total:null, reason:'missing_scenario' };
+  const all = rows.map(b => b.metadata?.verifiedScenario);
+  const first=all[0];
+  if (!first || !first.scenarioId || !first.label || !first.date || !first.currency || all.some(x=>!x || x.scenarioId!==first.scenarioId || x.label!==first.label || x.date!==first.date || x.currency!==first.currency)) return { total:null, reason:'missing_scenario' };
+  const result=scenarioPayout(all.map(x=>x.rule || {}),{date:first.date,currency:first.currency});
+  return result.total == null ? result : {...result,label:first.label,date:first.date};
+}
+export function groupPolicyValues(values, policies, personId) {
+  if(!personId) return [];
+  const byId=new Map((policies || []).map(p=>[p.id,p])); const groups=new Map();
+  for(const v of values || []) {
+    if(v.insuredPersonId!==personId || !byId.has(v.policyId) || v.amount == null || String(v.amount).trim()==='' || !Number.isFinite(Number(v.amount))) continue;
+    const key=JSON.stringify([v.policyId,v.currency || '',v.valuationDate || '',v.conditions || '']);
+    if(!groups.has(key)) groups.set(key,{policyId:v.policyId,policyName:byId.get(v.policyId).productName || '保單待確認',currency:v.currency || '',valuationDate:v.valuationDate || '',values:[]});
+    groups.get(key).values.push(v);
+  }
+  return [...groups.values()].map(group=>({...group,accumulated:accumulatedValueTotal(group.values)}));
+}

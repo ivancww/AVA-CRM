@@ -57,9 +57,9 @@ function loadWorker({ cacheNames = [], packageVersion = packageSource.version, f
 }
 
 test('service worker owns only CRM resources and cleans only CRM shell caches', async () => {
-  const activation = loadWorker({ cacheNames: ['ava-crm-shell', 'ava-crm-shell-0.4.1', 'ava-crm-shell-0.5.2', 'ava-platform-shell', 'other-app-shell'] });
+  const activation = loadWorker({ cacheNames: ['ava-crm-shell', 'ava-crm-shell-0.4.1', 'ava-crm-shell-0.5.2', 'ava-crm-shell-0.5.3', 'ava-platform-shell', 'other-app-shell'] });
   await new Promise((resolve) => activation.listeners.activate({ waitUntil: resolve }));
-  assert.deepEqual(activation.deleted, ['ava-crm-shell', 'ava-crm-shell-0.4.1']);
+  assert.deepEqual(activation.deleted, ['ava-crm-shell', 'ava-crm-shell-0.4.1', 'ava-crm-shell-0.5.2']);
 });
 
 test('formal release version deterministically changes the App Shell cache identity', async () => {
@@ -152,8 +152,12 @@ test('update lifecycle never clears CRM user storage', () => {
 });
 
 test('release contract uses package.json for the visible version and startup update check', () => {
-  assert.equal(packageSource.version, '0.5.2');
+  assert.equal(packageSource.version, '0.5.3');
   assert.match(appSource, /fetch\('\.\/package\.json', \{ cache: 'no-store' \}\)/);
   assert.match(appSource, /registerAppShellUpdate\(\)\.catch/);
   assert.match(registrationSource, /registration\.update\(\)/);
+});
+test('v0.5.3 package and lockfile share the release identity', () => {
+ const lock=JSON.parse(fs.readFileSync(new URL('../package-lock.json',import.meta.url),'utf8'));
+ assert.equal(packageSource.version,'0.5.3');assert.equal(lock.version,packageSource.version);assert.equal(lock.packages[''].version,packageSource.version);
 });
