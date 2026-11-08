@@ -19,8 +19,8 @@ const steps = ['perception', 'coverage', 'resources', 'retirement', 'reservoirs'
 function setStorageStatus(text) { const status = $('storageStatus'); if (status) status.textContent = text; }
 async function loadAppVersion() { try { const response = await fetch('./package.json', { cache: 'no-store' }); if (!response.ok) throw new Error('version source unavailable'); const manifest = await response.json(); if (!manifest.version) throw new Error('version missing'); $('appVersion').textContent = `v${manifest.version}`; } catch { $('appVersion').textContent = 'v—'; } }
 function openModal() { if (!modal.open) modal.showModal(); }
-function showModal(title, body, action = '') { $('modalBody').innerHTML = `<h2>${title}</h2><p>${body}</p>${action}`; openModal(); }
-function showModalContent(title, content, action) { const body = $('modalBody'); body.replaceChildren(); const heading = document.createElement('h2'); heading.textContent = title; body.append(heading); body.append(content); if (action) body.append(action); openModal(); }
+function showModal(title, body, action = '') { modal.classList.remove('ai-review-modal'); $('modalBody').innerHTML = `<h2>${title}</h2><p>${body}</p>${action}`; openModal(); }
+function showModalContent(title, content, action) { modal.classList.toggle('ai-review-modal', Boolean(state.readOnlyExtraction)); const body = $('modalBody'); body.replaceChildren(); const heading = document.createElement('h2'); heading.textContent = title; body.append(heading); body.append(content); if (action) body.append(action); openModal(); }
 function escapeText(value) { return String(value ?? '').replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c])); }
 function extractionValue(value) { if (value === null || value === undefined || value === '') return '待確認'; if (Array.isArray(value)) return value.length ? value.join('、') : '未有資料'; if (typeof value === 'object') return Object.values(value).filter((item) => item !== null && item !== undefined && item !== '').join(' · ') || '未有資料'; return String(value); }
 function extractionConfidence(value) { return typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value * 100)}%` : '未有'; }
@@ -46,7 +46,7 @@ function policyDetailContent(root, policy, productMatch) {
 function policySummaryCard(policy, productMatch, index, showDetails) {
   const card = document.createElement('article'); card.className = 'extraction-policy-card';
   const heading = document.createElement('h3'); heading.textContent = `保單 ${index + 1}`; card.append(heading);
-  addExtractionSection(card, '摘要', [['保險公司', policy.insurer], ['產品名稱', policy.productName], ['保單號碼', maskPolicyNumber(policy.policyNumber)], ['被保人', (policy.insuredPeople || []).map((person) => person.name || '待確認')], ['保費', policy.premium?.amount], ['整體信心', extractionConfidence(policy.overallConfidence)], ['Product Registry', productMatchLabel(productMatch)]]);
+  addExtractionSection(card, '摘要', [['保險公司', policy.insurer], ['產品名稱', policy.productName], ['保單號碼', maskPolicyNumber(policy.policyNumber)], ['識別受保人數', (policy.insuredPeople || []).length], ['被保人', (policy.insuredPeople || []).map((person) => person.name || '待確認')], ['保費', policy.premium?.amount], ['整體信心', extractionConfidence(policy.overallConfidence)], ['Product Registry', productMatchLabel(productMatch)]]);
   if (showDetails) { const button = document.createElement('button'); button.type = 'button'; button.className = 'ava-button ava-button--secondary'; button.textContent = '查看資料'; button.onclick = showDetails; card.append(button); }
   return card;
 }
@@ -62,7 +62,7 @@ function showPolicyExtractionResult(extraction, productMatches) {
   const root = document.createElement('div'); root.className = 'extraction-result';
   const badge = document.createElement('span'); badge.className = 'read-only-badge'; badge.textContent = 'AI 結果待核對；只保存你逐份確認的保單'; root.append(badge);
   const note = document.createElement('p'); note.className = 'ava-support'; note.textContent = '請逐份選擇、核對及確認；未確認的資料只保留於本次記憶體。'; root.append(note);
-  { const count = document.createElement('h3'); count.textContent = `已識別 ${extraction.policies.length} 份保單`; root.append(count); }
+  { const count = document.createElement('h3'); count.textContent = `已識別 ${extraction.policies.length} 份保單 · 已保存 ${approvedPolicies.size} 份 · 未保存 ${extraction.policies.length - approvedPolicies.size} 份`; root.append(count); }
   addExtractionList(root, '文件警告', extraction.documentWarnings);
   const cards = document.createElement('div'); cards.className = 'extraction-policy-cards'; extraction.policies.forEach((policy, index) => { const card=policySummaryCard(policy, productMatches[index], index, () => showPolicyDetail(extraction, productMatches, index)); const edit=document.createElement('button'); edit.type='button'; edit.className='ava-button ava-button--primary'; edit.textContent=approvedPolicies.has(index) ? '已保存' : '選擇並核對這份保單'; edit.disabled=approvedPolicies.has(index); edit.onclick=()=>openPolicyEditor(intakeDrafts[index], { extraction, productMatches, index }); card.append(edit); cards.append(card); }); root.append(cards);
   if (extraction.policies.length === 1) { const detail = document.createElement('div'); detail.className = 'extraction-policy-detail'; policyDetailContent(detail, extraction.policies[0], productMatches[0]); root.append(detail); }
