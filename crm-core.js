@@ -202,7 +202,8 @@ function confirmedPayoutScenario(b, policyId) {
   const q=b.payoutScenario;
   if (!q || !b.payoutReviewSignature || b.payoutReviewSignature !== payoutReviewSignature(b)) return null;
   const scenario={scenarioId:`${policyId}:${q.scenarioId || ''}`,label:String(q.label || '').trim(),date:String(q.date || '').trim(),currency:String(q.currency || '').trim().toUpperCase(),rule:{verified:true,source:String(q.source || '').trim(),currency:String(q.currency || '').trim().toUpperCase(),startDate:String(q.startDate || '').trim(),endDate:String(q.endDate || '').trim(),relationship:String(q.relationship || '').trim(),payableAmount:q.payableAmount,sharedGroup:String(q.sharedGroup || '').trim(),sharedRule:String(q.sharedRule || '').trim()}};
-  if (!q.scenarioId || !scenario.label || !scenario.rule.source || !scenario.currency || !scenario.date || String(b.currency || '').trim().toUpperCase() !== scenario.currency) return null;
+  if (!q.scenarioId || !scenario.label || !scenario.rule.source || !Number.isInteger(q.sourcePage) || q.sourcePage < 1 || String(q.sourceExcerpt || '').trim().length < 20 || !scenario.currency || !scenario.date || String(b.currency || '').trim().toUpperCase() !== scenario.currency) return null;
+  scenario.rule.evidence={page:q.sourcePage, excerpt:String(q.sourceExcerpt).trim()};
   return scenario;
 }
 // Scenario amounts are payable amounts established for the same event, not face amounts.
@@ -240,6 +241,7 @@ export function verifiedCoverageScenario(benefits, personId, category) {
   const all = rows.map(b => b.metadata?.verifiedScenario);
   const first=all[0];
   if (!first || !first.scenarioId || !first.label || !first.date || !first.currency || all.some(x=>!x || x.scenarioId!==first.scenarioId || x.label!==first.label || x.date!==first.date || x.currency!==first.currency)) return { total:null, reason:'missing_scenario' };
+  if (all.some(x=>!Number.isInteger(x.rule?.evidence?.page) || x.rule.evidence.page<1 || String(x.rule.evidence.excerpt || '').trim().length<20)) return {total:null,reason:'missing_document_evidence'};
   const result=scenarioPayout(all.map(x=>x.rule || {}),{date:first.date,currency:first.currency});
   return result.total == null ? result : {...result,label:first.label,date:first.date};
 }
