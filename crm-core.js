@@ -109,7 +109,10 @@ export function preparePolicyGroup(input, makeId = () => crypto.randomUUID()) {
     const n = amount(v.amount, '現金價值'); if (n === null) throw new Error('請輸入現金價值');
     return { id: makeId(), policyId: id, insuredPersonId: personId, valueType, amount: n, currency: text(v.currency).toUpperCase(), yearOrAge: text(v.yearOrAge), createdAt: now };
   });
-  return { policy, roles, benefits, values, personIds: [...new Set([holder, ...insured])] };
+  const newPeople = (input.newPeople || []).map((person) => ({ id: text(person.id), householdId, name: text(person.name), relationship: text(person.relationship), createdAt: now }));
+  if (newPeople.some((person) => !person.id || !person.name || !person.relationship || !insured.includes(person.id))) throw new Error('新增受保人資料不完整');
+  if (new Set(newPeople.map((person) => person.id)).size !== newPeople.length) throw new Error('新增受保人重複');
+  return { policy, roles, benefits, values, newPeople, personIds: [...new Set([holder, ...insured])] };
 }
 
 export function policyDuplicateKey(policy) {
@@ -128,11 +131,20 @@ export async function saveConfirmedPolicy(db, group, { acknowledgeOtherHousehold
     const check = () => {
       if (--remaining) return;
       try {
-        if (!household || group.personIds.some((id) => !people.some((person) => person.id === id && person.householdId === household.id))) return fail('客戶或人物關係無效');
+        const additions = group.newPeople || [];
+        if (!household || additions.some(person => person.householdId !== household.id || !person.name || !person.relationship)) return fail('客戶或人物關係無效');
+        const keys = new Set();
+        for (const person of additions) {
+          const key = normalizeSearchName(person.name).replace(/\s+/g, '');
+          if (!key || keys.has(key) || people.some(p => p.id === person.id || (p.householdId === household.id && normalizeSearchName(p.name).replace(/\s+/g, '') === key))) return fail('受保人名稱可能重複；請選擇現有人物或核對資料');
+          keys.add(key);
+        }
+        if (group.personIds.some((id) => ![...people, ...additions].some((person) => person.id === id && person.householdId === household.id))) return fail('客戶或人物關係無效');
         const key = policyDuplicateKey(group.policy);
         const matches = policies.filter((p) => key && policyDuplicateKey(p) === key);
         if (matches.some((p) => p.householdId === household.id)) return fail('偵測到相同保險公司及保單號碼；請查看現有保單');
         if (matches.length && !acknowledgeOtherHousehold) return fail('其他客戶可能已有相同保單；請先核對，沒有自動連結');
+        for (const person of additions) tx.objectStore('people').add(person);
         tx.objectStore('policies').add(group.policy);
         for (const role of group.roles) tx.objectStore('policyRoles').add(role);
         for (const benefit of group.benefits) tx.objectStore('benefits').add(benefit);

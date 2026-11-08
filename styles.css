@@ -190,3 +190,18 @@ html,body{max-width:100%;overflow-x:hidden}
 .policy-actions { display:flex; gap:8px; flex-wrap:wrap; }
 @media (max-width:650px) { .policy-form-grid, .policy-repeat { grid-template-columns:1fr; } }
 .policy-editor fieldset label { display:inline-flex; align-items:center; min-height:44px; margin-right:12px; }
+
+/* Scope the wider dialog to AI review; unrelated and Admin dialogs retain their size. */
+@media (min-width: 651px) {
+  .ava-modal.ai-review-modal { width: min(94vw, calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right) - 24px)); max-width:none; max-height:calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 24px); }
+}
+.ai-review-modal .extraction-policy-cards { grid-template-columns:repeat(auto-fit,minmax(min(100%, 300px),1fr)); }
+.ai-review-modal .modal-content { overflow-wrap:anywhere; }
+
+.ai-workspace { display:grid; grid-template-columns:minmax(190px, 24%) minmax(0,1fr); gap:16px; align-items:start; }
+.ai-policy-nav { display:flex; flex-direction:column; gap:8px; position:sticky; top:0; max-height:65dvh; overflow:auto; }
+.ai-policy-nav .ava-button { min-height:44px; white-space:normal; overflow-wrap:anywhere; text-align:left; justify-content:flex-start; }
+.ai-policy-pane { min-width:0; }
+.ai-review-modal .policy-actions { position:sticky; bottom:0; background:var(--ava-color-surface); padding:12px; z-index:2; border-top:1px solid var(--ava-color-border); }
+@media(max-width:650px) { .ai-workspace { grid-template-columns:1fr; } .ai-policy-nav { position:static; max-height:180px; } }
+.ai-policy-nav [aria-current="step"] { border-color:var(--ava-color-primary); background:var(--ava-color-brand-soft); box-shadow:inset 3px 0 var(--ava-color-primary); }

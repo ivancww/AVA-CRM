@@ -12,6 +12,7 @@ let intakeDrafts = [];
 let approvedPolicies = new Set();
 let policySaving = false;
 let policyUiEpoch = 0;
+let activePolicyIndex = null;
 const state = { db: null, registry: null, households: [], household: null, people: [], insuredPerson: null, selectedData: { roles: [], policies: [], benefits: [], values: [] }, readOnlyExtraction: null, perception: '', activeCategory: 'medical', categoryPerceptions: {}, priority: '', sessionStep: 0, dataFileHandle: null, fileSync: 'pending', officialSource: 'built-in-fallback' };
 const entryMode = resolveAvaEntry(window.location.search);
 const editableFrontstageFields = ['homeTitle', 'intake-title'];
@@ -19,14 +20,24 @@ const steps = ['perception', 'coverage', 'resources', 'retirement', 'reservoirs'
 function setStorageStatus(text) { const status = $('storageStatus'); if (status) status.textContent = text; }
 async function loadAppVersion() { try { const response = await fetch('./package.json', { cache: 'no-store' }); if (!response.ok) throw new Error('version source unavailable'); const manifest = await response.json(); if (!manifest.version) throw new Error('version missing'); $('appVersion').textContent = `v${manifest.version}`; } catch { $('appVersion').textContent = 'v—'; } }
 function openModal() { if (!modal.open) modal.showModal(); }
-function showModal(title, body, action = '') { $('modalBody').innerHTML = `<h2>${title}</h2><p>${body}</p>${action}`; openModal(); }
-function showModalContent(title, content, action) { const body = $('modalBody'); body.replaceChildren(); const heading = document.createElement('h2'); heading.textContent = title; body.append(heading); body.append(content); if (action) body.append(action); openModal(); }
+function showModal(title, body, action = '') { modal.classList.remove('ai-review-modal'); $('modalBody').innerHTML = `<h2>${title}</h2><p>${body}</p>${action}`; openModal(); }
+function showModalContent(title, content, action) {
+  const extraction = state.readOnlyExtraction; modal.classList.toggle('ai-review-modal', Boolean(extraction));
+  const body = $('modalBody'); body.replaceChildren(); const heading = document.createElement('h2'); heading.textContent = title; body.append(heading);
+  if (extraction && intakeDrafts.length) {
+    const workspace=document.createElement('div'); workspace.className='ai-workspace';
+    const nav=document.createElement('nav'); nav.className='ai-policy-nav'; nav.setAttribute('aria-label','保單導覽');
+    const label=document.createElement('strong');label.textContent=`保單 ${extraction.policies.length} 份 · 已保存 ${approvedPolicies.size} 份`;nav.append(label);
+    intakeDrafts.forEach((draft,index)=>{const btn=document.createElement('button');btn.type='button';btn.className='ava-button ava-button--secondary';let complete=false;try { preparePolicyGroup(draft); complete=true; } catch (_) { /* incomplete draft */ }btn.textContent=`${index+1}. ${draft.productName || '未命名保單'} · ${approvedPolicies.has(index)?'已保存':complete?'未保存':'未完成'}`;btn.disabled=approvedPolicies.has(index);if(index===activePolicyIndex)btn.setAttribute('aria-current','step');btn.onclick=()=>{if(policySaving)return;const productMatches=resolvePolicyMatches(extraction,state.registry?.['產品資料'] || [],resolveProductMatch);openPolicyEditor(draft,{extraction,productMatches,index});};nav.append(btn);});
+    const pane=document.createElement('div');pane.className='ai-policy-pane';pane.append(content);if(action)pane.append(action);workspace.append(nav,pane);body.append(workspace);
+  } else {body.append(content);if(action)body.append(action);} openModal();
+}
 function escapeText(value) { return String(value ?? '').replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c])); }
 function extractionValue(value) { if (value === null || value === undefined || value === '') return '待確認'; if (Array.isArray(value)) return value.length ? value.join('、') : '未有資料'; if (typeof value === 'object') return Object.values(value).filter((item) => item !== null && item !== undefined && item !== '').join(' · ') || '未有資料'; return String(value); }
 function extractionConfidence(value) { return typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value * 100)}%` : '未有'; }
 function addExtractionSection(root, title, rows) { const section = document.createElement('section'); section.className = 'extraction-section'; const heading = document.createElement('h3'); heading.textContent = title; section.append(heading); const grid = document.createElement('div'); grid.className = 'extraction-grid'; rows.forEach(([label, value]) => { const item = document.createElement('div'); item.className = 'extraction-field'; const labelElement = document.createElement('span'); labelElement.className = 'extraction-label'; labelElement.textContent = label; const valueElement = document.createElement('strong'); valueElement.textContent = extractionValue(value); item.append(labelElement, valueElement); grid.append(item); }); section.append(grid); root.append(section); }
 function addExtractionList(root, title, values) { const section = document.createElement('section'); section.className = 'extraction-section'; const heading = document.createElement('h3'); heading.textContent = title; section.append(heading); const list = document.createElement('ul'); list.className = 'extraction-list'; const items = Array.isArray(values) && values.length ? values : ['未有資料']; items.forEach((value) => { const item = document.createElement('li'); item.textContent = extractionValue(value); list.append(item); }); section.append(list); root.append(section); }
-function closeExtractionTest() { if (policySaving) return; policyUiEpoch++; state.readOnlyExtraction = null; intakeDrafts = []; approvedPolicies = new Set(); if (extractionRequest) { extractionRequest.controller.abort(); clearTimeout(extractionRequest.timer); clearInterval(extractionRequest.clock); extractionRequest = null; } policyPickerCleanup?.(); policyPickerCleanup = null; if (modal.open) modal.close(); }
+function closeExtractionTest() { if (policySaving) return; policyUiEpoch++; activePolicyIndex=null; state.readOnlyExtraction = null; intakeDrafts = []; approvedPolicies = new Set(); if (extractionRequest) { extractionRequest.controller.abort(); clearTimeout(extractionRequest.timer); clearInterval(extractionRequest.clock); extractionRequest = null; } policyPickerCleanup?.(); policyPickerCleanup = null; if (modal.open) modal.close(); }
 function maskPolicyNumber(value) { const text = String(value || '').trim(); return text ? (text.length <= 4 ? '••••' : `${text.slice(0, 2)}••••${text.slice(-2)}`) : '待確認'; }
 function productMatchLabel(match) { return match?.status === 'exact' ? 'exact' : match?.status === 'candidate' ? 'candidate · 需 Agent 確認' : 'none'; }
 function policyDetailContent(root, policy, productMatch) {
@@ -46,7 +57,7 @@ function policyDetailContent(root, policy, productMatch) {
 function policySummaryCard(policy, productMatch, index, showDetails) {
   const card = document.createElement('article'); card.className = 'extraction-policy-card';
   const heading = document.createElement('h3'); heading.textContent = `保單 ${index + 1}`; card.append(heading);
-  addExtractionSection(card, '摘要', [['保險公司', policy.insurer], ['產品名稱', policy.productName], ['保單號碼', maskPolicyNumber(policy.policyNumber)], ['被保人', (policy.insuredPeople || []).map((person) => person.name || '待確認')], ['保費', policy.premium?.amount], ['整體信心', extractionConfidence(policy.overallConfidence)], ['Product Registry', productMatchLabel(productMatch)]]);
+  addExtractionSection(card, '摘要', [['保險公司', policy.insurer], ['產品名稱', policy.productName], ['保單號碼', maskPolicyNumber(policy.policyNumber)], ['識別受保人數', (policy.insuredPeople || []).length], ['被保人', (policy.insuredPeople || []).map((person) => person.name || '待確認')], ['保費', policy.premium?.amount], ['整體信心', extractionConfidence(policy.overallConfidence)], ['Product Registry', productMatchLabel(productMatch)]]);
   if (showDetails) { const button = document.createElement('button'); button.type = 'button'; button.className = 'ava-button ava-button--secondary'; button.textContent = '查看資料'; button.onclick = showDetails; card.append(button); }
   return card;
 }
@@ -62,7 +73,7 @@ function showPolicyExtractionResult(extraction, productMatches) {
   const root = document.createElement('div'); root.className = 'extraction-result';
   const badge = document.createElement('span'); badge.className = 'read-only-badge'; badge.textContent = 'AI 結果待核對；只保存你逐份確認的保單'; root.append(badge);
   const note = document.createElement('p'); note.className = 'ava-support'; note.textContent = '請逐份選擇、核對及確認；未確認的資料只保留於本次記憶體。'; root.append(note);
-  { const count = document.createElement('h3'); count.textContent = `已識別 ${extraction.policies.length} 份保單`; root.append(count); }
+  { const count = document.createElement('h3'); count.textContent = `已識別 ${extraction.policies.length} 份保單 · 已保存 ${approvedPolicies.size} 份 · 未保存 ${extraction.policies.length - approvedPolicies.size} 份`; root.append(count); }
   addExtractionList(root, '文件警告', extraction.documentWarnings);
   const cards = document.createElement('div'); cards.className = 'extraction-policy-cards'; extraction.policies.forEach((policy, index) => { const card=policySummaryCard(policy, productMatches[index], index, () => showPolicyDetail(extraction, productMatches, index)); const edit=document.createElement('button'); edit.type='button'; edit.className='ava-button ava-button--primary'; edit.textContent=approvedPolicies.has(index) ? '已保存' : '選擇並核對這份保單'; edit.disabled=approvedPolicies.has(index); edit.onclick=()=>openPolicyEditor(intakeDrafts[index], { extraction, productMatches, index }); card.append(edit); cards.append(card); }); root.append(cards);
   if (extraction.policies.length === 1) { const detail = document.createElement('div'); detail.className = 'extraction-policy-detail'; policyDetailContent(detail, extraction.policies[0], productMatches[0]); root.append(detail); }
@@ -142,9 +153,9 @@ async function aiIntake() {
 }
 function manualPolicy() { if (!state.household || !state.db) return; openPolicyEditor(makePolicyDraft(state.household.id)); }
 function openPolicyEditor(draft, context = null) {
-  policyUiEpoch++;
+  policyUiEpoch++; activePolicyIndex=context?.index ?? null;
   const back = context ? () => showPolicyExtractionResult(context.extraction, context.productMatches) : null;
-  const root=renderPolicyEditor({ draft, people:state.people, extracted:!!context, onCancel:closeExtractionTest, onBack:back, onReview:(value,error)=>reviewPolicy(value,error,context) });
+  const root=renderPolicyEditor({ draft, people:state.people, extracted:!!context, onCancel:closeExtractionTest, onBack:back, onRerender:()=>openPolicyEditor(draft,context), onReview:(value,error)=>reviewPolicy(value,error,context) });
   showModalContent(context ? `核對保單 ${context.index + 1}` : '手動加入保單', root);
 }
 async function reviewPolicy(draft, errorElement, context) {
@@ -155,8 +166,9 @@ async function reviewPolicy(draft, errorElement, context) {
     if (epoch !== policyUiEpoch || !modal.open) return;
     const root=document.createElement('div'); root.className='extraction-result';
     const title=document.createElement('p'); title.textContent=`客戶：${state.household.displayName}。請核對以下資料後才確認。`; root.append(title);
-    const personName=id=>state.people.find(p=>p.id===id)?.name || '未選擇';
+    const personName=id=>[...state.people,...(group.newPeople || [])].find(p=>p.id===id)?.name || '未選擇';
     addExtractionSection(root,'保單資料', [['保險公司',group.policy.insurer],['產品',group.policy.productName],['版本',group.policy.productVersion],['保單號碼',group.policy.policyNumber],['狀態',group.policy.status],['簽發日期',group.policy.issueDate],['生效日期',group.policy.effectiveDate],['持有人',personName(group.policy.policyHolderId)],['被保人',group.roles.map(r=>personName(r.insuredPersonId))],['保費',group.policy.premium],['貨幣',group.policy.currency],['頻率',group.policy.paymentFrequency],['繳費期',group.policy.paymentTerm],['保障期',group.policy.coverageTerm],['保障額',group.policy.sumAssured],['保障額貨幣',group.policy.sumAssuredCurrency],['附加保障',group.policy.riders]]);
+    if (group.newPeople?.length) addExtractionSection(root,'確認新增家庭人物',group.newPeople.map((person,index)=>[`新人物 ${index+1}`,`${person.name} · ${person.relationship}（確認後與保單一併建立）`]));
     addExtractionSection(root,'保障項目',group.benefits.length ? group.benefits.map((b,i)=>[`保障 ${i+1}`,`${personName(b.insuredPersonId)} · ${b.primaryCategory} · ${b.benefitType} · ${extractionValue(b.amount)} ${b.currency} · ${b.limit || ''} ${b.unit || ''} ${b.benefitForm || ''} ${b.metadata?.notes || ''}`]) : [['保障','未有資料']]);
     addExtractionSection(root,'現金價值',group.values.length ? group.values.map((v,i)=>[`價值 ${i+1}`,`${personName(v.insuredPersonId)} · ${v.valueType} · ${v.amount} ${v.currency} · ${v.yearOrAge}`]) : [['價值','未有資料']]);
     if (context) { const match=resolveProductMatch(state.registry?.['產品資料'] || [],group.policy); addExtractionSection(root,'產品資料庫', [['匹配結果',productMatchLabel(match)]]); }
@@ -171,7 +183,7 @@ async function reviewPolicy(draft, errorElement, context) {
       if (policySaving) return; policySaving=true; confirm.disabled=true;back.disabled=true;
       let saved=false;
       try { await saveConfirmedPolicy(state.db,group,{ acknowledgeOtherHousehold:!!acknowledgement?.checked });
-        saved=true; if(context) approvedPolicies.add(context.index);
+        saved=true; if(context) approvedPolicies.add(context.index); const selectedPersonId=state.insuredPerson?.id || ''; await selectHousehold({target:{value:state.household.id}}); $('insuredSelect').value=selectedPersonId;
         if(state.insuredPerson) {state.selectedData=await loadInsuredPersonData(state.db,state.insuredPerson.id);renderCategory(state.activeCategory);renderReview();renderResources();}
         let syncMessage='本機已保存；可手動備份資料檔。';if(state.dataFileHandle) syncMessage=await syncDataFile() ? '本機已保存，備份檔已同步。' : '本機已保存，備份同步失敗，請重新選擇檔案。';
         const result=document.createElement('div');const text=document.createElement('p');text.textContent=syncMessage;result.append(text);const done=document.createElement('button');done.type='button';done.className='ava-button ava-button--secondary';done.textContent=context?'返回保單列表':'完成';done.onclick=context ? ()=>showPolicyExtractionResult(context.extraction,context.productMatches) : closeExtractionTest;result.append(done);showModalContent('保單已保存',result);

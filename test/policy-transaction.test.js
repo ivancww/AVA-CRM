@@ -72,3 +72,11 @@ test('policy role write failure aborts policy and dependent writes', async () =>
 test('date and premium fields reject malformed data and normalize payment frequency', () => {
  const a=input();a.effectiveDate='2026-02-30';assert.throws(()=>preparePolicyGroup(a),/日期/);a.effectiveDate='2026-02-28';const p=preparePolicyGroup(a).policy;assert.equal(p.paymentFrequency,'monthly');assert.equal(p.effectiveDate,'2026-02-28');a.currency='';assert.throws(()=>preparePolicyGroup(a),/貨幣/);
 });
+test('new insured person joins policy atomically and rolls back on failure', async () => {
+ const db=await fresh(); const i=input('NEW');i.insuredPersonIds=['insured','new-person'];i.newPeople=[{id:'new-person',name:'Child',relationship:'子女'}];i.benefits.push({insuredPersonId:'new-person',primaryCategory:'life',benefitType:'Child cover',amount:10});
+ const first=preparePolicyGroup(i); first.roles[0].id='collision';await saveLocal(db,'policyRoles',{id:'collision'});await assert.rejects(saveConfirmedPolicy(db,first));let data=await exportUserLayer(db);assert.equal(data.data.people.some(p=>p.id==='new-person'),false);assert.equal(data.data.policies.length,0);
+ const second=preparePolicyGroup(i);await saveConfirmedPolicy(db,second);const child=await loadInsuredPersonData(db,'new-person');assert.equal(child.policies.length,1);assert.equal(child.benefits.length,1);db.close();
+});
+test('new insured duplicate name is rejected before any write', async () => {
+ const db=await fresh();const i=input('DUP');i.insuredPersonIds=['insured','new-person'];i.newPeople=[{id:'new-person',name:' INSURED ',relationship:'家人'}];await assert.rejects(saveConfirmedPolicy(db,preparePolicyGroup(i)),/重複/);const data=await exportUserLayer(db);assert.equal(data.data.policies.length,0);assert.equal(data.data.people.length,2);db.close();
+});
