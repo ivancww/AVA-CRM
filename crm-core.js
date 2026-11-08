@@ -45,7 +45,18 @@ function hasConfirmedCompatibleVersion(product, version) {
 }
 export function matchProduct(products = [], query = {}) { const n = normalizeSearchName; const insurer = n(query.insurer); const product = n(query.productName); const version = n(query.productVersion); const exact = products.find((item) => n(item.insurer) === insurer && n(item.productName) === product && hasConfirmedCompatibleVersion(item, version)); if (exact) return { status: 'exact', product: exact, requiresConfirmation: false }; const candidates = products.filter((item) => n(item.insurer) === insurer && product && meaningfulProductSimilarity(n(item.productName), product)); return candidates.length ? { status: 'candidate', candidates, requiresConfirmation: true } : { status: 'none', candidates: [], requiresConfirmation: true }; }
 export function meaningfulProductSimilarity(left, right) { if (!left || !right) return false; if (left === right || left.includes(right) || right.includes(left)) return true; const leftTokens = new Set(left.split(/[\s·•丨|，,()（）-]+/).filter(Boolean)); const rightTokens = new Set(right.split(/[\s·•丨|，,()（）-]+/).filter(Boolean)); return [...leftTokens].some((token) => token.length >= 2 && rightTokens.has(token)); }
-export function resolveProductMatch(products = [], extracted = {}) { const result = matchProduct(products, extracted); if (result.status === 'exact') return { ...result, verifiedFeatures: result.product.features || [], customerExplanations: result.product.customerExplanations || [] }; if (result.status === 'candidate') return { ...result, candidateFeatures: [], message: 'Candidate match requires User confirmation.' }; return { ...result, candidateFeatures: extracted.features || [], message: 'No verified registry match; extracted features remain needs_confirmation.' }; }
+export function resolveProductMatch(products = [], extracted = {}) {
+  const result = matchProduct(products, extracted);
+  if (result.status === 'exact') {
+    const status = normalizeSearchName(result.product.dataStatus || result.product.verificationStatus || result.product['資料狀態']);
+    const version = normalizeSearchName(extracted.productVersion);
+    const verified = ['verified','confirmed','已核實','已確認'].includes(status) && version && !['待確認','unknown','未確認'].includes(version);
+    if (verified) return { ...result, verifiedFeatures: result.product.features || [], customerExplanations: result.product.customerExplanations || [] };
+    return { status:'candidate', candidates:[result.product], requiresConfirmation:true, candidateFeatures:[], message:'Registry source or product version is not verified.' };
+  }
+  if (result.status === 'candidate') return { ...result, candidateFeatures: [], message: 'Candidate match requires User confirmation.' };
+  return { ...result, candidateFeatures: [], message: 'No verified registry match.' };
+}
 export function createDeviceTransferPointer() { return `ava-crm-transfer:${crypto.randomUUID()}`; }
 export function emptyOfficialRegistry() { return { '保障分類': [], '產品資料': [], 'Review問題': [], '頁面設定': [], '系統設定': [] }; }
 
@@ -183,4 +194,32 @@ export async function findPolicyDuplicates(db, candidate) {
   const rows = await new Promise((resolve, reject) => { const req=db.transaction('policies','readonly').objectStore('policies').getAll(); req.onsuccess=()=>resolve(req.result); req.onerror=()=>reject(req.error); });
   const key=policyDuplicateKey(candidate); const matches=rows.filter(row=>key && policyDuplicateKey(row) === key);
   return { sameHousehold:matches.filter(row=>row.householdId === candidate.householdId), otherHousehold:matches.some(row=>row.householdId !== candidate.householdId) };
+}
+
+// Scenario amounts are payable amounts established for the same event, not face amounts.
+// Unknown interactions, dates, currencies and reimbursement expenses block a total.
+export function scenarioPayout(items, scenario = {}) {
+  const day = String(scenario.date || '');
+  const validDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0,10) === value;
+  if (!validDate(day) || !scenario.currency || !Array.isArray(items) || !items.length) return { total: null, reason: 'insufficient_scenario' };
+  let total = 0; const groups = new Map();
+  for (const item of items) {
+    if (item.verified !== true || !item.source || item.currency !== scenario.currency || !validDate(item.startDate) || !validDate(item.endDate) || item.endDate < item.startDate) return { total: null, reason: 'unverified_terms' };
+    if (day < item.startDate || day > item.endDate) continue;
+    if (item.relationship === 'reimbursement') return { total: null, reason: 'reimbursement_not_additive' };
+    if (item.payableAmount == null || String(item.payableAmount).trim() === '' || !Number.isFinite(Number(item.payableAmount)) || Number(item.payableAmount) < 0) return { total: null, reason: 'missing_amount' };
+    const amount = Number(item.payableAmount);
+    if (item.relationship === 'additional') total += amount;
+    else if (item.relationship === 'shared' && item.sharedGroup && item.sharedRule === 'maximum') groups.set(item.sharedGroup, Math.max(groups.get(item.sharedGroup) || 0, amount));
+    else return { total: null, reason: 'unknown_relationship' };
+  }
+  for (const amount of groups.values()) total += amount;
+  return { total, currency: scenario.currency };
+}
+
+export function medicalContractsForPerson(policies, personId) {
+  if (!personId) return [];
+  return (policies || []).flatMap(policy => (policy.contracts || [])
+    .filter(contract => contract.insuredPersonId === personId && contract.category === 'medical' && !/免付保費|豁免保費|waiver\s+of\s+premium/i.test(contract.name || ''))
+    .map(contract => ({ policyId: policy.id, policyName: policy.productName, contractId: contract.contractId, name: contract.name })));
 }
