@@ -256,3 +256,24 @@ export function groupPolicyValues(values, policies, personId) {
   }
   return [...groups.values()].map(group=>({...group,accumulated:accumulatedValueTotal(group.values)}));
 }
+
+// No labels or model-generated IDs establish cross-policy event equivalence.
+// A comparison must explicitly identify every reviewed benefit and its evidence.
+export function crossPolicyScenario(benefits, personId, category, comparison) {
+  const rows=categoryBenefits((benefits || []).filter(b=>b.insuredPersonId===personId),category);
+  if (!personId || rows.length<2 || new Set(rows.map(b=>b.policyId)).size<2 || rows.some(b=>!b.policyId || !b.id)) return {total:null,reason:'incomplete_policies'};
+  if (!comparison || comparison.reviewed !== true || comparison.insuredPersonId!==personId || !comparison.event || !comparison.event.definition || !comparison.event.criteria || !comparison.event.date || !comparison.event.currency) return {total:null,reason:'unverified_event'};
+  const proofs=Array.isArray(comparison.proofs) ? comparison.proofs : [];
+  if (proofs.length!==rows.length || new Set(proofs.map(p=>p.benefitId)).size!==rows.length) return {total:null,reason:'incomplete_evidence'};
+  const rules=[];
+  for (const b of rows) {
+    const proof=proofs.find(p=>p.benefitId===b.id && p.policyId===b.policyId);
+    const evidence=proof?.evidence;
+    if (!proof || proof.eventEquivalent !== true || proof.interactionConfirmed !== true || !evidence?.source || !Number.isInteger(evidence.page) || evidence.page<1 || String(evidence.excerpt || '').trim().length<20) return {total:null,reason:'incomplete_evidence'};
+    const q=b.metadata?.verifiedScenario;
+    if (!q || q.date!==comparison.event.date || q.currency!==comparison.event.currency || !q.rule?.verified || !q.rule.evidence?.page || !q.rule.evidence?.excerpt) return {total:null,reason:'unverified_terms'};
+    rules.push(q.rule);
+  }
+  const result=scenarioPayout(rules,{date:comparison.event.date,currency:comparison.event.currency});
+  return result.total==null ? result : {...result,policyIds:[...new Set(rows.map(b=>b.policyId))]};
+}
