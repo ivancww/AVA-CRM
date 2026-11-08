@@ -1,1 +1,1 @@
-{"name":"ava-crm","version":"0.5.3","private":true,"type":"module","scripts":{"test":"node --test","test:browser":"node browser-tests/policy-workflow.cjs && node browser-tests/review-v053.cjs"},"devDependencies":{"fake-indexeddb":"^6.2.7","playwright":"^1.62.1"}}
+{"name":"ava-crm","version":"0.5.3","private":true,"type":"module","scripts":{"test":"node --test","test:browser":"node browser-tests/policy-workflow.cjs && node browser-tests/review-v053.cjs && node browser-tests/cross-policy.cjs"},"devDependencies":{"fake-indexeddb":"^6.2.7","playwright":"^1.62.1"}}

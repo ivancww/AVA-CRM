@@ -277,3 +277,20 @@ export function crossPolicyScenario(benefits, personId, category, comparison) {
   const result=scenarioPayout(rules,{date:comparison.event.date,currency:comparison.event.currency});
   return result.total==null ? result : {...result,policyIds:[...new Set(rows.map(b=>b.policyId))]};
 }
+
+// Store comparison inside the existing User Layer, preserving legacy backups.
+export function comparisonSnapshot(benefits) {
+  return JSON.stringify([...benefits].sort((a,b)=>String(a.id).localeCompare(String(b.id))).map(b=>({id:b.id,policyId:b.policyId,insuredPersonId:b.insuredPersonId,primaryCategory:b.primaryCategory,benefitCategory:b.benefitCategory,presentationTags:b.presentationTags,amount:b.amount,currency:b.currency,benefitType:b.benefitType,metadata:b.metadata})));
+}
+export async function saveReviewedComparison(db, personId, category, comparison) {
+  if (!db || !personId || comparison?.insuredPersonId!==personId || comparison.reviewed!==true) throw new Error('核對資料未完成');
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction(['benefits','settings'],'readwrite');const req=tx.objectStore('benefits').index('byInsuredPersonId').getAll(IDBKeyRange.only(personId));let failure;
+    req.onsuccess=()=>{try {const rows=categoryBenefits(req.result,category);const result=crossPolicyScenario(rows,personId,category,comparison);if(result.total==null)throw new Error('未能核實情境及保障資料，沒有保存');const record={id:`cross-policy:${personId}:${category}`,key:'cross-policy-comparison',insuredPersonId:personId,category,comparison,snapshot:comparisonSnapshot(rows),confirmedBy:'本機使用者（未識別）',confirmedAt:new Date().toISOString()};tx.objectStore('settings').put(record);}catch(e){failure=e;tx.abort();}};
+    tx.oncomplete=()=>resolve(true);tx.onabort=tx.onerror=()=>reject(failure || tx.error || new Error('保存失敗'));
+  });
+}
+export function reviewedComparisonResult(record, benefits, personId, category) {
+  if(!record || record.insuredPersonId!==personId || record.category!==category || record.snapshot!==comparisonSnapshot(categoryBenefits((benefits||[]).filter(b=>b.insuredPersonId===personId),category)))return {total:null,reason:'stale_or_missing'};
+  return crossPolicyScenario(benefits,personId,category,record.comparison);
+}
