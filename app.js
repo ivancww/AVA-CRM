@@ -106,9 +106,10 @@ function renderCategory(category) { state.activeCategory = category; const copy 
 function showCrossPolicyReview(list,benefits,category) {
   const personId=state.insuredPerson?.id;if(!personId || new Set(benefits.map(b=>b.policyId)).size<2)return;
   const action=document.createElement('button');action.type='button';action.className='ava-button ava-button--secondary';action.textContent='核對跨保單保障';action.onclick=()=>openCrossPolicyReview(benefits,category,personId);list.append(action);
-  getById(state.db,'settings',`cross-policy:${personId}:${category}`).then(record=>{
+  Promise.all([getById(state.db,'settings',`cross-policy:${personId}:${category}`),loadInsuredPersonData(state.db,personId)]).then(([record,current])=>{
     if(state.insuredPerson?.id!==personId || state.activeCategory!==category || !action.isConnected)return;
-    const result=reviewedComparisonResult(record,benefits,personId,category);if(result.total==null)return;
+    const result=reviewedComparisonResult(record,current.benefits,personId,category);if(result.total==null)return;
+    const notice=list.querySelector('.coverage-total');if(notice?.textContent.includes('未計算總賠償'))notice.remove();action.textContent='重新核對跨保單保障';
     const total=document.createElement('p');total.className='coverage-total';total.textContent=`已核對跨保單情境可賠償總額：${result.currency} ${result.total.toLocaleString()}`;list.append(total);
   }).catch(()=>{});
 }
