@@ -23,6 +23,18 @@ export function coverageTotals(benefits, category) {
   const amounts = eligible.map((benefit) => Number(benefit.amount));
   return amounts.every(Number.isFinite) ? amounts.reduce((total, amount) => total + amount, 0) : null;
 }
+// A display-only arithmetic sum, never an implied surrender or withdrawal value.
+export const ACCUMULATED_VALUE_TYPES = ['annual_dividend', 'terminal_dividend', 'cash_value', 'reversionary_bonus'];
+export function accumulatedValueTotal(values = []) {
+  const parts = ACCUMULATED_VALUE_TYPES.map(type => values.filter(v => v.valueType === type));
+  if (parts.some(rows => rows.length !== 1)) return { complete: false, total: null };
+  const rows = parts.map(rows => rows[0]);
+  if (rows.some(v => v.verified !== true || v.amount === null || v.amount === undefined || String(v.amount).trim() === '' || !Number.isFinite(Number(v.amount)) || Number(v.amount) < 0 || !v.currency || !v.valuationDate)) return { complete: false, total: null };
+  const first = rows[0];
+  if (rows.some(v => v.currency !== first.currency || v.valuationDate !== first.valuationDate || (v.conditions || '') !== (first.conditions || ''))) return { complete: false, total: null };
+  return { complete: true, total: rows.reduce((n, v) => n + Number(v.amount), 0), currency: first.currency, valuationDate: first.valuationDate };
+}
+
 export function comparePolicy(existing = {}, extracted = {}) { return POLICY_COMPARE_FIELDS.filter((field) => JSON.stringify(existing[field] ?? null) !== JSON.stringify(extracted[field] ?? null)).map((field) => ({ field, existing: existing[field] ?? null, extracted: extracted[field] ?? null })); }
 function hasConfirmedCompatibleVersion(product, version) {
   const n = normalizeSearchName;
@@ -105,9 +117,9 @@ export function preparePolicyGroup(input, makeId = () => crypto.randomUUID()) {
   });
   const values = (input.values || []).map((v) => {
     const personId = text(v.insuredPersonId), valueType = text(v.valueType);
-    if (!insured.includes(personId) || !['current_policy_cash_value', 'guaranteed_value', 'non_guaranteed_value'].includes(valueType)) throw new Error('現金價值需要指定被保人及種類');
+    if (!insured.includes(personId) || !['current_policy_cash_value', 'guaranteed_value', 'non_guaranteed_value', 'cash_reserve', 'annual_dividend', 'terminal_dividend', 'cash_value', 'reversionary_bonus', 'net_policy_value'].includes(valueType)) throw new Error('現金價值需要指定被保人及種類');
     const n = amount(v.amount, '現金價值'); if (n === null) throw new Error('請輸入現金價值');
-    return { id: makeId(), policyId: id, insuredPersonId: personId, valueType, amount: n, currency: text(v.currency).toUpperCase(), yearOrAge: text(v.yearOrAge), createdAt: now };
+    return { id: makeId(), policyId: id, insuredPersonId: personId, valueType, amount: n, currency: text(v.currency).toUpperCase(), yearOrAge: text(v.yearOrAge), valuationDate: date(v.valuationDate, '估值日期'), verified: v.verified === true, conditions: text(v.conditions), includesComponents: Array.isArray(v.includesComponents) ? v.includesComponents.map(text).filter(Boolean) : [], createdAt: now };
   });
   const newPeople = (input.newPeople || []).map((person) => ({ id: text(person.id), householdId, name: text(person.name), relationship: text(person.relationship), createdAt: now }));
   if (newPeople.some((person) => !person.id || !person.name || !person.relationship || !insured.includes(person.id))) throw new Error('新增受保人資料不完整');

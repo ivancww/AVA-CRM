@@ -1,3 +1,4 @@
+import { accumulatedValueTotal, ACCUMULATED_VALUE_TYPES } from './crm-core.js';
 // User-controlled form values are assigned via DOM properties, never HTML.
 function node(tag, text, className) { const el = document.createElement(tag); if (text != null) el.textContent = String(text); if (className) el.className = className; return el; }
 function button(label, fn) { const el = node('button', label, 'ava-button ava-button--secondary'); el.type = 'button'; el.addEventListener('click', fn); return el; }
@@ -14,7 +15,7 @@ function select(root, label, model, key, choices) {
 }
 function section(root, title) { const details = node('details'); details.append(node('summary', title)); root.append(details); return details; }
 const categoryOptions = [['medical','醫療'],['critical','危疾'],['life','人壽'],['accident','意外']];
-const valueOptions = [['current_policy_cash_value','現時現金價值'],['guaranteed_value','保證價值'],['non_guaranteed_value','非保證價值']];
+const valueOptions = [['current_policy_cash_value','現時現金價值'],['guaranteed_value','保證價值'],['non_guaranteed_value','非保證價值'],['cash_reserve','現金儲備戶口'],['annual_dividend','週年紅利'],['terminal_dividend','終期紅利'],['cash_value','現金價值'],['reversionary_bonus','復歸紅利'],['net_policy_value','原文件淨保單價值']];
 export function makePolicyDraft(householdId, extracted = null) {
   const policy = extracted || {}; const sum = Array.isArray(policy.sumAssured) ? policy.sumAssured : [];
   const values = [];
@@ -22,10 +23,29 @@ export function makePolicyDraft(householdId, extracted = null) {
     if (v.guaranteed != null && v.guaranteed !== '') values.push({ valueType:'guaranteed_value', amount:v.guaranteed, currency:v.currency || '', yearOrAge:v.yearOrAge || '', insuredPersonId:'' });
     if (v.nonGuaranteed != null && v.nonGuaranteed !== '') values.push({ valueType:'non_guaranteed_value', amount:v.nonGuaranteed, currency:v.currency || '', yearOrAge:v.yearOrAge || '', insuredPersonId:'' });
   }
+  const allowedValues = ['cash_reserve', 'annual_dividend', 'terminal_dividend', 'cash_value', 'reversionary_bonus', 'net_policy_value'];
+  for (const v of Array.isArray(policy.structuredValues) ? policy.structuredValues : []) {
+    if (allowedValues.includes(v.type) && v.amount != null) values.push({ valueType:v.type, amount:v.amount, currency:v.currency || '', valuationDate:v.valuationDate || '', conditions:v.conditions || '', includesComponents:v.includesComponents || [], insuredPersonId:'', verified:false });
+  }
   return { householdId, insurer:policy.insurer || '', productName:policy.productName || '', productVersion:policy.productVersion || '', policyNumber:policy.policyNumber || '', status:policy.policyStatus || '', issueDate:policy.issueDate || '', effectiveDate:policy.effectiveDate || '', premium:policy.premium?.amount ?? '', currency:policy.premium?.currency || '', paymentFrequency:policy.premium?.frequency || '', paymentTerm:policy.paymentTerm || '', coverageTerm:policy.coverageTerm || '', sumAssured:sum.length === 1 ? sum[0].amount ?? '' : '', sumAssuredCurrency:sum.length === 1 ? sum[0].currency || '' : '', policyHolderId:'', insuredPersonIds:[], benefits:(policy.benefits || []).map(b => ({ benefitType:b.name || '', amount:b.amount ?? '', limit:b.limit ?? '', currency:b.currency || '', primaryCategory:'', insuredPersonId:'', unit:'', benefitForm:'', notes:b.notes || '', extractedCategory:b.category || '', confidence:b.confidence })), values, riders:(policy.riders || []).map(r => typeof r === 'string' ? r : r?.name || '').filter(Boolean), extractedNames:extracted ? { holder:policy.policyholder?.name || '', insured:(policy.insuredPeople || []).map(p => p.name).filter(Boolean) } : null, extractionWarnings:extracted ? [...(policy.missingFields || []), ...(policy.conflicts || []), ...(policy.warnings || []), ...(sum.length > 1 ? ['識別到多項保障額，請核對並自行輸入所需金額'] : [])] : [], overallConfidence:policy.overallConfidence };
 }
 export function renderPolicyEditor({ draft, people, onReview, onCancel, onBack, extracted, onRerender }) {
   const root = node('div', null, 'policy-editor');
+  if (extracted && !draft.categoryConfirmed) {
+    root.append(node('h3', '步驟 1：確認產品保障分類'));
+    root.append(node('p', '請按各項保障核對分類，同一保單可包含不同類別。', 'ava-support'));
+    for (const benefit of draft.benefits) {
+      const card = node('div', null, 'policy-repeat');
+      card.append(node('strong', benefit.benefitType || '未命名保障'));
+      if (benefit.extractedCategory) card.append(node('p', `AI 建議：${benefit.extractedCategory}`));
+      select(card, '保障分類', benefit, 'primaryCategory', categoryOptions);
+      root.append(card);
+    }
+    root.append(button('確認分類並核對保單', () => { draft.categoryConfirmed = true; onRerender(); }));
+    root.append(button('取消', onCancel));
+    return root;
+  }
+  if (extracted) root.append(button('返回確認分類', () => { draft.categoryConfirmed = false; onRerender(); }));
   const note = node('p', '請核對每項資料；未提供的資料可留空。持有人及所有被保人須從已選家庭中選擇。', 'ava-support'); root.append(note);
   if (extracted) { const warning=node('p', `AI 資料只供核對。識別持有人：${draft.extractedNames?.holder || '未識別'}；被保人：${draft.extractedNames?.insured?.join('、') || '未識別'}。請親自選擇人物和保障分類。`, 'blocked-note'); root.append(warning); const peopleList=node('ul');peopleList.setAttribute('aria-label','AI 識別的受保人');for(const name of draft.extractedNames?.insured || [])peopleList.append(node('li',name));root.append(node('p',`AI 識別受保人：${draft.extractedNames?.insured?.length || 0} 人`),peopleList); const summary=node('p', `整體信心：${draft.overallConfidence == null ? '未有資料' : Math.round(draft.overallConfidence*100)+'%'}；缺失／衝突／警告：${draft.extractionWarnings.length ? draft.extractionWarnings.join('、') : '未有提示'}。仍需逐項核對。`, 'blocked-note');root.append(summary); }
   const grid=node('div',null,'policy-form-grid'); root.append(grid);
@@ -43,7 +63,8 @@ export function renderPolicyEditor({ draft, people, onReview, onCancel, onBack, 
   function renderBenefits(){benefitList.replaceChildren(); draft.benefits.forEach((b,i)=>{const row=node('div',null,'policy-repeat');row.append(node('h4',`保障 ${i+1}`));if(b.extractedCategory || b.confidence != null) row.append(node('p',`AI 分類：${b.extractedCategory || '未識別'}；信心：${b.confidence == null ? '未有' : Math.round(b.confidence*100)+'%'}；請確認分類。`, 'ava-support'));select(row,'被保人 *',b,'insuredPersonId',choices);select(row,'分類 *',b,'primaryCategory',categoryOptions);field(row,'保障名稱 *',b,'benefitType');field(row,'金額',b,'amount');field(row,'限額說明',b,'limit');field(row,'貨幣',b,'currency');field(row,'單位',b,'unit');field(row,'保障形式',b,'benefitForm');field(row,'保障備註',b,'notes');row.append(button('刪除此保障',()=>{draft.benefits.splice(i,1);renderBenefits();}));benefitList.append(row);});}
   benefitSection.append(button('＋ 新增保障',()=>{draft.benefits.push({});renderBenefits();}));renderBenefits();
   const valueSection=section(root,'現金價值（選填）'); valueSection.open=!!draft.values.length; const valueList=node('div');valueSection.append(valueList);
-  function renderValues(){valueList.replaceChildren();draft.values.forEach((v,i)=>{const row=node('div',null,'policy-repeat');row.append(node('h4',`價值 ${i+1}`));select(row,'被保人 *',v,'insuredPersonId',choices);select(row,'價值種類 *',v,'valueType',valueOptions);field(row,'金額 *',v,'amount');field(row,'貨幣',v,'currency');field(row,'保單年／年齡',v,'yearOrAge');row.append(button('刪除此價值',()=>{draft.values.splice(i,1);renderValues();}));valueList.append(row);});}
+  function renderValues(){valueList.replaceChildren();draft.values.forEach((v,i)=>{const row=node('div',null,'policy-repeat');row.append(node('h4',`價值 ${i+1}`));select(row,'被保人 *',v,'insuredPersonId',choices);select(row,'價值種類 *',v,'valueType',valueOptions);field(row,'金額 *',v,'amount');field(row,'貨幣',v,'currency');field(row,'保單年／年齡',v,'yearOrAge');field(row,'估值日期（YYYY-MM-DD）',v,'valuationDate');field(row,'適用條件',v,'conditions');const verified=node('label');const check=node('input');check.type='checkbox';check.checked=v.verified === true;check.addEventListener('change',()=>{v.verified=check.checked;updateTotal();});verified.append(check,document.createTextNode(' 已核實'));row.append(verified);row.addEventListener('input',updateTotal);row.addEventListener('change',updateTotal);row.append(button('刪除此價值',()=>{draft.values.splice(i,1);renderValues();}));valueList.append(row);});}
+  const totalDisplay=node('p'); function updateTotal(){const result=accumulatedValueTotal(draft.values); totalDisplay.textContent=result.complete ? `四類累積價值合計：${result.currency} ${result.total.toLocaleString()}（算術合計）` : '四類累積價值合計：資料未齊或條件不相符';} valueSection.append(totalDisplay);updateTotal();
   valueSection.append(button('＋ 新增價值',()=>{draft.values.push({});renderValues();}));renderValues();
   const riderSection=section(root,'附加保障（選填，每行一項）'); const rider=node('textarea'); rider.value=draft.riders.join('\n');rider.addEventListener('input',()=>{draft.riders=rider.value.split('\n').map(s=>s.trim()).filter(Boolean);});rider.setAttribute('aria-label','附加保障');riderSection.append(rider);
   const error=node('p','', 'blocked-note');error.setAttribute('role','alert');root.append(error);
