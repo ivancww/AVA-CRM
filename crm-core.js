@@ -131,7 +131,7 @@ export function preparePolicyGroup(input, makeId = () => crypto.randomUUID()) {
     if (b.contractId && !linkedContract) throw new Error('保障所屬附加契約無效');
     if (linkedContract?.insuredPersonId && linkedContract.insuredPersonId !== personId) throw new Error('保障與附加契約的受保人不一致');
     return createBenefit({ id: makeId(), policyId: id, insuredPersonId: personId, primaryCategory: category, benefitCategory: category,
-      benefitType: type, amount: amount(b.amount, '保障金額'), limit: text(b.limit), currency: text(b.currency).toUpperCase(), unit: text(b.unit), benefitForm: text(b.benefitForm), presentationTags: [...new Set((b.presentationTags || []).map(text).filter(x => ['medical','critical','life','accident','savings','other'].includes(x)))], metadata: { classificationConfirmed: true, notes: text(b.notes), contractId: text(b.contractId), extractedCategory: text(b.extractedCategory) }, createdAt: now });
+      benefitType: type, amount: amount(b.amount, '保障金額'), limit: text(b.limit), currency: text(b.currency).toUpperCase(), unit: text(b.unit), benefitForm: text(b.benefitForm), presentationTags: [...new Set((b.presentationTags || []).map(text).filter(x => ['medical','critical','life','accident','savings','other'].includes(x)))], metadata: { classificationConfirmed: true, notes: text(b.notes), contractId: text(b.contractId), extractedCategory: text(b.extractedCategory), verifiedScenario: confirmedPayoutScenario(b,id) }, createdAt: now });
   });
   const values = (input.values || []).filter(v => v.amount != null && String(v.amount).trim() !== '').map((v) => {
     const personId = text(v.insuredPersonId), valueType = text(v.valueType);
@@ -194,6 +194,17 @@ export async function findPolicyDuplicates(db, candidate) {
   return { sameHousehold:matches.filter(row=>row.householdId === candidate.householdId), otherHousehold:matches.some(row=>row.householdId !== candidate.householdId) };
 }
 
+// Confirmation is bound to identity, contract and displayed financial facts.
+export function payoutReviewSignature(b) {
+  return JSON.stringify([b.insuredPersonId || '',b.contractId || '',b.primaryCategory || '',b.benefitType || '',String(b.amount ?? ''),b.currency || '',b.payoutScenario || null]);
+}
+function confirmedPayoutScenario(b, policyId) {
+  const q=b.payoutScenario;
+  if (!q || !b.payoutReviewSignature || b.payoutReviewSignature !== payoutReviewSignature(b)) return null;
+  const scenario={scenarioId:`${policyId}:${q.scenarioId || ''}`,label:String(q.label || '').trim(),date:String(q.date || '').trim(),currency:String(q.currency || '').trim().toUpperCase(),rule:{verified:true,source:String(q.source || '').trim(),currency:String(q.currency || '').trim().toUpperCase(),startDate:String(q.startDate || '').trim(),endDate:String(q.endDate || '').trim(),relationship:String(q.relationship || '').trim(),payableAmount:q.payableAmount,sharedGroup:String(q.sharedGroup || '').trim(),sharedRule:String(q.sharedRule || '').trim()}};
+  if (!q.scenarioId || !scenario.label || !scenario.rule.source || !scenario.currency || !scenario.date || String(b.currency || '').trim().toUpperCase() !== scenario.currency) return null;
+  return scenario;
+}
 // Scenario amounts are payable amounts established for the same event, not face amounts.
 // Unknown interactions, dates, currencies and reimbursement expenses block a total.
 export function scenarioPayout(items, scenario = {}) {
