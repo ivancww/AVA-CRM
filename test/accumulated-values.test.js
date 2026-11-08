@@ -23,3 +23,11 @@ test('confirmed components retain valuation metadata in policy preparation', asy
   assert.equal(group.values[0].valuationDate,'2026-01-01');
   assert.deepEqual(group.values[0].includesComponents,['annual_dividend']);
 });
+test('values belonging to different people or policies cannot be added', () => {
+ const a=rows().map(v=>({...v,insuredPersonId:'person-a',policyId:'policy-a'}));
+ a[1].insuredPersonId='person-b';assert.equal(accumulatedValueTotal(a).complete,false);
+ a[1].insuredPersonId='person-a';a[1].policyId='policy-b';assert.equal(accumulatedValueTotal(a).complete,false);
+});
+test('blank value placeholders do not create records or block valid policies', async () => {
+ const {preparePolicyGroup}=await import('../crm-core.js');let n=0;const group=preparePolicyGroup({householdId:'h',policyHolderId:'p',insuredPersonIds:['p'],insurer:'Test',productName:'Example',policyNumber:'N',values:[{valueType:'cash_reserve',amount:''},{valueType:'annual_dividend',amount:null}]},()=>String(++n));assert.equal(group.values.length,0);
+});

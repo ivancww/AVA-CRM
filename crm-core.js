@@ -31,7 +31,7 @@ export function accumulatedValueTotal(values = []) {
   const rows = parts.map(rows => rows[0]);
   if (rows.some(v => v.verified !== true || v.amount === null || v.amount === undefined || String(v.amount).trim() === '' || !Number.isFinite(Number(v.amount)) || Number(v.amount) < 0 || !v.currency || !v.valuationDate)) return { complete: false, total: null };
   const first = rows[0];
-  if (rows.some(v => v.currency !== first.currency || v.valuationDate !== first.valuationDate || (v.conditions || '') !== (first.conditions || ''))) return { complete: false, total: null };
+  if (rows.some(v => v.currency !== first.currency || v.valuationDate !== first.valuationDate || (v.conditions || '') !== (first.conditions || '') || (v.insuredPersonId || '') !== (first.insuredPersonId || '') || (v.policyId || '') !== (first.policyId || ''))) return { complete: false, total: null };
   return { complete: true, total: rows.reduce((n, v) => n + Number(v.amount), 0), currency: first.currency, valuationDate: first.valuationDate };
 }
 
@@ -118,8 +118,11 @@ export function preparePolicyGroup(input, makeId = () => crypto.randomUUID()) {
   const benefits = (input.benefits || []).map((b) => {
     const personId = text(b.insuredPersonId), category = text(b.primaryCategory), type = text(b.benefitType);
     if (!insured.includes(personId) || !category || !type) throw new Error('保障項目需要指定被保人、分類及名稱');
+    const linkedContract = b.contractId && (input.contracts || []).find(c => c.contractId === b.contractId);
+    if (b.contractId && !linkedContract) throw new Error('保障所屬附加契約無效');
+    if (linkedContract?.insuredPersonId && linkedContract.insuredPersonId !== personId) throw new Error('保障與附加契約的受保人不一致');
     return createBenefit({ id: makeId(), policyId: id, insuredPersonId: personId, primaryCategory: category, benefitCategory: category,
-      benefitType: type, amount: amount(b.amount, '保障金額'), limit: text(b.limit), currency: text(b.currency).toUpperCase(), unit: text(b.unit), benefitForm: text(b.benefitForm), metadata: { classificationConfirmed: true, notes: text(b.notes) }, createdAt: now });
+      benefitType: type, amount: amount(b.amount, '保障金額'), limit: text(b.limit), currency: text(b.currency).toUpperCase(), unit: text(b.unit), benefitForm: text(b.benefitForm), presentationTags: [...new Set((b.presentationTags || []).map(text).filter(x => ['medical','critical','life','accident','savings','other'].includes(x)))], metadata: { classificationConfirmed: true, notes: text(b.notes), contractId: text(b.contractId), extractedCategory: text(b.extractedCategory) }, createdAt: now });
   });
   const values = (input.values || []).filter(v => v.amount != null && String(v.amount).trim() !== '').map((v) => {
     const personId = text(v.insuredPersonId), valueType = text(v.valueType);
