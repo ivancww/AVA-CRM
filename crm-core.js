@@ -115,7 +115,7 @@ export function preparePolicyGroup(input, makeId = () => crypto.randomUUID()) {
     status: text(input.status), issueDate: date(input.issueDate, '簽發日期'), effectiveDate: date(input.effectiveDate, '生效日期'),
     premium, currency, paymentFrequency: frequency,
     paymentTerm: text(input.paymentTerm), coverageTerm: text(input.coverageTerm), sumAssured: amount(input.sumAssured, '保障額'), sumAssuredCurrency: text(input.sumAssuredCurrency).toUpperCase(),
-    protectionScope: text(input.protectionScope),
+    protectionScope: text(input.protectionScope), sourceSumAssured:(input.sourceSumAssured || []).map(item=>({name:text(item.name),amount:amount(item.amount,'文件保障額'),currency:text(item.currency).toUpperCase()})),
     officialProductInfo: input.officialProduct?.status === 'exact' ? { source:'Official 產品資料', entries:(input.officialProduct.entries || []).map(e=>({category:text(e.category), feature:text(e.feature), explanation:text(e.explanation), version:text(e.version), status:text(e.status)})) } : null,
     riders: (input.riders || []).map(text).filter(Boolean),
     contracts: (input.contracts || []).map((c, index) => {
