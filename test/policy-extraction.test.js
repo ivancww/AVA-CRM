@@ -152,3 +152,9 @@ test('logging contract excludes raw document and extracted customer data', () =>
   assert.match(logBlock, /fileSize/);
   assert.doesNotMatch(logBlock, /base64Data|policyNumber|customer|extracted|prompt/i);
 });
+
+test('GAS normalization retains provisional scenario facts without asserting verification', async () => {
+  const vm = await import('node:vm'); const context=vm.createContext({}); vm.runInContext(gasSource,context);
+  const result=context.normalizePolicyRecord_({benefits:[{name:'Example',payoutScenario:{scenarioId:'s',label:'Example',date:'2026-06-01',currency:'HKD',relationship:'additional',source:'Page 1',startDate:'2026-01-01',endDate:'2026-12-31',payableAmount:1000,verified:true}}]});
+  const scenario=result.benefits[0].payoutScenario; assert.equal(scenario.payableAmount,1000); assert.equal(scenario.source,'Page 1'); assert.equal(scenario.verified,undefined);
+});

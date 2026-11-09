@@ -45,8 +45,16 @@ const GEMINI_EXTRACTION_SCHEMA = Object.freeze({
       premium: { type: 'OBJECT', properties: { amount: { type: 'NUMBER' }, currency: { type: 'STRING' }, frequency: { type: 'STRING' }, confidence: { type: 'NUMBER' } } },
       paymentTerm: { type: 'STRING' }, coverageTerm: { type: 'STRING' },
       sumAssured: { type: 'ARRAY', items: { type: 'OBJECT', properties: { name: { type: 'STRING' }, amount: { type: 'NUMBER' }, currency: { type: 'STRING' }, confidence: { type: 'NUMBER' } } } },
-      benefits: { type: 'ARRAY', items: { type: 'OBJECT', properties: { name: { type: 'STRING' }, category: { type: 'STRING' }, amount: { type: 'NUMBER' }, currency: { type: 'STRING' }, limit: { type: 'STRING' }, notes: { type: 'STRING' }, confidence: { type: 'NUMBER' } } } },
+      benefits: { type: 'ARRAY', items: { type: 'OBJECT', properties: { name: { type: 'STRING' }, category: { type: 'STRING' }, amount: { type: 'NUMBER' }, currency: { type: 'STRING' }, limit: { type: 'STRING' }, notes: { type: 'STRING' }, confidence: { type: 'NUMBER' }, payoutScenario: { type: 'OBJECT', properties: { scenarioId: {type:'STRING'}, label: {type:'STRING'}, date: {type:'STRING'}, currency: {type:'STRING'}, relationship: {type:'STRING'}, source: {type:'STRING'}, sourcePage: {type:'NUMBER'}, sourceExcerpt: {type:'STRING'}, startDate: {type:'STRING'}, endDate: {type:'STRING'}, payableAmount: {type:'NUMBER'}, sharedGroup: {type:'STRING'}, sharedRule: {type:'STRING'} } } } } },
       cashValues: { type: 'ARRAY', items: { type: 'OBJECT', properties: { type: { type: 'STRING' }, yearOrAge: { type: 'STRING' }, guaranteed: { type: 'NUMBER' }, nonGuaranteed: { type: 'NUMBER' }, currency: { type: 'STRING' }, confidence: { type: 'NUMBER' } } } },
+      structuredRiders: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
+        name: { type: 'STRING' }, insuredName: { type: 'STRING' }, category: { type: 'STRING' },
+        premium: { type: 'NUMBER' }, premiumCurrency: { type: 'STRING' }, paymentFrequency: { type: 'STRING' },
+        sumAssured: { type: 'NUMBER' }, currency: { type: 'STRING' }, effectiveDate: { type: 'STRING' },
+        paymentTerm: { type: 'STRING' }, paidUpDate: { type: 'STRING' }, coverageTerm: { type: 'STRING' },
+        protectionScope: { type: 'STRING' }, annualDeductible: { type: 'STRING' }, annualLimit: { type: 'STRING' }, lifetimeLimit: { type: 'STRING' }
+      } } },
+      structuredValues: { type: 'ARRAY', items: { type: 'OBJECT', properties: { type: { type: 'STRING' }, amount: { type: 'NUMBER' }, currency: { type: 'STRING' }, valuationDate: { type: 'STRING' }, conditions: { type: 'STRING' }, includesComponents: { type: 'ARRAY', items: { type: 'STRING' } } } } },
       riders: { type: 'ARRAY', items: { type: 'STRING' } }, keyDates: { type: 'ARRAY', items: { type: 'STRING' } }, missingFields: { type: 'ARRAY', items: { type: 'STRING' } }, conflicts: { type: 'ARRAY', items: { type: 'STRING' } }, warnings: { type: 'ARRAY', items: { type: 'STRING' } }, overallConfidence: { type: 'NUMBER' }
     } } },
     documentWarnings: { type: 'ARRAY', items: { type: 'STRING' } }
@@ -63,6 +71,9 @@ const GEMINI_EXTRACTION_PROMPT = [
   'Separate independent policies by distinct policy identity, product, policy section, insured contract, or policy schedule.',
   'Return every identified independent policy in policies[]. Never collapse separate policies merely because they share an insurer, policyholder, or insured person.',
   'If policy boundaries are uncertain, preserve that uncertainty in documentWarnings or policy conflicts instead of silently merging records.',
+  'Keep main contracts and riders separate; extract rider terms and medical limits only if explicitly documented. Do not assign all insured people to all policies.',
+  'Distinguish cash reserve, annual dividend, terminal dividend, cash value, reversionary bonus and net policy value. Preserve dates and component inclusion where documented.',
+  'Only extract a payout scenario when the document explicitly states its event, amount, interaction, period and source; never treat a coverage amount as a payable amount.',
   'Do not provide insurance advice. Do not calculate values that are not present in the document.',
   'Return only JSON matching the supplied extraction schema.'
 ].join(' ');
@@ -217,12 +228,19 @@ function normalizePolicyRecord_(value) {
     premium: { amount: extractionNumber_(premium.amount), currency: extractionText_(premium.currency), frequency: extractionText_(premium.frequency), confidence: extractionConfidence_(premium.confidence) },
     paymentTerm: extractionText_(value.paymentTerm), coverageTerm: extractionText_(value.coverageTerm),
     sumAssured: extractionArray_(value.sumAssured, item => ({ name: extractionText_(item && item.name), amount: extractionNumber_(item && item.amount), currency: extractionText_(item && item.currency), confidence: extractionConfidence_(item && item.confidence) })),
-    benefits: extractionArray_(value.benefits, item => ({ name: extractionText_(item && item.name), category: extractionText_(item && item.category), amount: extractionNumber_(item && item.amount), currency: extractionText_(item && item.currency), limit: extractionText_(item && item.limit), notes: extractionText_(item && item.notes), confidence: extractionConfidence_(item && item.confidence) })),
+    benefits: extractionArray_(value.benefits, item => ({ name: extractionText_(item && item.name), category: extractionText_(item && item.category), amount: extractionNumber_(item && item.amount), currency: extractionText_(item && item.currency), limit: extractionText_(item && item.limit), notes: extractionText_(item && item.notes), confidence: extractionConfidence_(item && item.confidence), payoutScenario: normalizePayoutScenario_(item && item.payoutScenario) })),
     cashValues: extractionArray_(value.cashValues, item => ({ type: extractionText_(item && item.type), yearOrAge: extractionText_(item && item.yearOrAge), guaranteed: extractionNumber_(item && item.guaranteed), nonGuaranteed: extractionNumber_(item && item.nonGuaranteed), currency: extractionText_(item && item.currency), confidence: extractionConfidence_(item && item.confidence) })),
+    structuredRiders: extractionArray_(value.structuredRiders, r => ({ name: extractionText_(r.name), insuredName: extractionText_(r.insuredName), category: extractionText_(r.category), premium: extractionNumber_(r.premium), premiumCurrency: extractionText_(r.premiumCurrency), paymentFrequency: extractionText_(r.paymentFrequency), sumAssured: extractionNumber_(r.sumAssured), currency: extractionText_(r.currency), effectiveDate: extractionText_(r.effectiveDate), paymentTerm: extractionText_(r.paymentTerm), paidUpDate: extractionText_(r.paidUpDate), coverageTerm: extractionText_(r.coverageTerm), protectionScope: extractionText_(r.protectionScope), annualDeductible: extractionText_(r.annualDeductible), annualLimit: extractionText_(r.annualLimit), lifetimeLimit: extractionText_(r.lifetimeLimit) })),
+    structuredValues: extractionArray_(value.structuredValues, v => ({ type: extractionText_(v.type), amount: extractionNumber_(v.amount), currency: extractionText_(v.currency), valuationDate: extractionText_(v.valuationDate), conditions: extractionText_(v.conditions), includesComponents: extractionTextArray_(v.includesComponents) })),
     riders: extractionTextArray_(value.riders), keyDates: extractionTextArray_(value.keyDates), missingFields: extractionTextArray_(value.missingFields), conflicts: extractionTextArray_(value.conflicts), warnings: extractionTextArray_(value.warnings), overallConfidence: extractionConfidence_(value.overallConfidence)
   };
 }
 
+// All extraction output is provisional; the client must obtain explicit review.
+function normalizePayoutScenario_(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return { scenarioId:extractionText_(value.scenarioId), label:extractionText_(value.label), date:extractionText_(value.date), currency:extractionText_(value.currency), relationship:extractionText_(value.relationship), source:extractionText_(value.source), sourcePage:extractionNumber_(value.sourcePage), sourceExcerpt:extractionText_(value.sourceExcerpt), startDate:extractionText_(value.startDate), endDate:extractionText_(value.endDate), payableAmount:extractionNumber_(value.payableAmount), sharedGroup:extractionText_(value.sharedGroup), sharedRule:extractionText_(value.sharedRule) };
+}
 function extractionText_(value) { return value === null || value === undefined ? '' : String(value).slice(0, 4000); }
 function extractionNumber_(value) { return typeof value === 'number' && Number.isFinite(value) ? value : null; }
 function extractionConfidence_(value) { return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1 ? value : null; }
