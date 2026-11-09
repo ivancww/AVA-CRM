@@ -135,9 +135,9 @@ export function preparePolicyGroup(input, makeId = () => crypto.randomUUID()) {
   });
   const values = (input.values || []).filter(v => v.amount != null && String(v.amount).trim() !== '').map((v) => {
     const personId = text(v.insuredPersonId), valueType = text(v.valueType);
-    if (!insured.includes(personId) || !['current_policy_cash_value', 'guaranteed_value', 'non_guaranteed_value', 'cash_reserve', 'annual_dividend', 'terminal_dividend', 'cash_value', 'reversionary_bonus', 'net_policy_value'].includes(valueType)) throw new Error('現金價值需要指定被保人及種類');
+    if (!insured.includes(personId) || !['current_policy_cash_value', 'guaranteed_value', 'non_guaranteed_value', 'cash_reserve', 'annual_dividend', 'terminal_dividend', 'cash_value', 'reversionary_bonus', 'net_policy_value', 'unclassified_document_value'].includes(valueType)) throw new Error('現金價值需要指定被保人及種類');
     const n = amount(v.amount, '現金價值'); if (n === null) throw new Error('請輸入現金價值');
-    return { id: makeId(), policyId: id, insuredPersonId: personId, valueType, amount: n, currency: text(v.currency).toUpperCase(), yearOrAge: text(v.yearOrAge), source: text(v.source) || 'agent_confirmed', valuationDate: date(v.valuationDate, '估值日期'), verified: v.verified === true, conditions: text(v.conditions), includesComponents: Array.isArray(v.includesComponents) ? v.includesComponents.map(text).filter(Boolean) : [], createdAt: now };
+    return { id: makeId(), policyId: id, insuredPersonId: personId, valueType, amount: n, currency: text(v.currency).toUpperCase(), yearOrAge: text(v.yearOrAge), sourceType: text(v.sourceType), component: text(v.component), source: text(v.source) || 'agent_confirmed', valuationDate: date(v.valuationDate, '估值日期'), verified: v.verified === true, conditions: text(v.conditions), includesComponents: Array.isArray(v.includesComponents) ? v.includesComponents.map(text).filter(Boolean) : [], createdAt: now };
   });
   const newPeople = (input.newPeople || []).map((person) => ({ id: text(person.id), householdId, name: text(person.name), relationship: text(person.relationship), createdAt: now }));
   if (newPeople.some((person) => !person.id || !person.name || !person.relationship || !insured.includes(person.id))) throw new Error('新增受保人資料不完整');
@@ -238,6 +238,8 @@ export function medicalContractsForPerson(policies, personId) {
 export function verifiedCoverageScenario(benefits, personId, category) {
   const rows = categoryBenefits(benefits.filter(b => b.insuredPersonId === personId), category);
   if (!personId || !rows.length) return { total:null, reason:'missing_scenario' };
+  // Multiple benefits require an explicitly reviewed interaction, not a model-generated scenario ID.
+  if (rows.length > 1) return { total:null, reason:'interaction_review_required' };
   const all = rows.map(b => b.metadata?.verifiedScenario);
   const first=all[0];
   if (!first || !first.scenarioId || !first.label || !first.date || !first.currency || all.some(x=>!x || x.scenarioId!==first.scenarioId || x.label!==first.label || x.date!==first.date || x.currency!==first.currency)) return { total:null, reason:'missing_scenario' };

@@ -21,14 +21,25 @@ export function makePolicyDraft(householdId, extracted = null) {
   const policy = extracted || {}; const sum = Array.isArray(policy.sumAssured) ? policy.sumAssured : [];
   const values = [];
   for (const v of Array.isArray(policy.cashValues) ? policy.cashValues : []) {
-    if (v.guaranteed != null && v.guaranteed !== '') values.push({ valueType:'guaranteed_value', amount:v.guaranteed, currency:v.currency || '', yearOrAge:v.yearOrAge || '', insuredPersonId:'' });
-    if (v.nonGuaranteed != null && v.nonGuaranteed !== '') values.push({ valueType:'non_guaranteed_value', amount:v.nonGuaranteed, currency:v.currency || '', yearOrAge:v.yearOrAge || '', insuredPersonId:'' });
+    // Legacy GAS cannot distinguish a reserve balance from value components.
+    // Preserve ambiguous reserve data without classifying it as guaranteed value.
+    const reserve=/現金儲備|cash\s*reserve/i.test(String(v.type || ''));
+    if (v.guaranteed != null && v.guaranteed !== '') values.push({ valueType:reserve?'unclassified_document_value':'guaranteed_value', sourceType:v.type || '', component:'guaranteed', amount:v.guaranteed, currency:v.currency || '', yearOrAge:v.yearOrAge || '', insuredPersonId:'' });
+    if (v.nonGuaranteed != null && v.nonGuaranteed !== '') values.push({ valueType:reserve?'unclassified_document_value':'non_guaranteed_value', sourceType:v.type || '', component:'non_guaranteed', amount:v.nonGuaranteed, currency:v.currency || '', yearOrAge:v.yearOrAge || '', insuredPersonId:'' });
   }
   const allowedValues = ['cash_reserve', 'annual_dividend', 'terminal_dividend', 'cash_value', 'reversionary_bonus', 'net_policy_value'];
   for (const v of Array.isArray(policy.structuredValues) ? policy.structuredValues : []) {
     if (allowedValues.includes(v.type) && v.amount != null) values.push({ valueType:v.type, amount:v.amount, currency:v.currency || '', valuationDate:v.valuationDate || '', conditions:v.conditions || '', includesComponents:v.includesComponents || [], insuredPersonId:'', verified:false });
   }
   const contracts = (policy.structuredRiders || []).map((r, i) => ({ ...r, contractId: `rider-${i+1}`, insuredPersonId: '', category: r.category || '', source: 'pdf' }));
+  // Deployed legacy GAS returns rider names, not structured rider objects.
+  // Preserve them as reviewable contracts without duplicating structured matches.
+  const riderNameKey = name => String(name || '').normalize('NFKC').trim().toLocaleLowerCase();
+  const seen = new Set(contracts.map(c => riderNameKey(c.name)).filter(Boolean));
+  for (const rider of Array.isArray(policy.riders) ? policy.riders : []) {
+    const name=typeof rider==='string' ? rider.trim() : ''; const key=riderNameKey(name);
+    if (key && !seen.has(key)) {seen.add(key);contracts.push({name,contractId:`rider-${contracts.length+1}`,insuredPersonId:'',category:'',source:'pdf'});}
+  }
   return { contracts, householdId, insurer:policy.insurer || '', productName:policy.productName || '', productVersion:policy.productVersion || '', policyNumber:policy.policyNumber || '', status:policy.policyStatus || '', issueDate:policy.issueDate || '', effectiveDate:policy.effectiveDate || '', premium:policy.premium?.amount ?? '', currency:policy.premium?.currency || '', paymentFrequency:policy.premium?.frequency || '', paymentTerm:policy.paymentTerm || '', coverageTerm:policy.coverageTerm || '', sumAssured:sum.length === 1 ? sum[0].amount ?? '' : '', sumAssuredCurrency:sum.length === 1 ? sum[0].currency || '' : '', policyHolderId:'', insuredPersonIds:[], hiddenContractualData:(policy.benefits || []).filter(b => /免付保費|豁免保費|waiver\s+of\s+premium/i.test(b.name || '')).map(b => ({...b})), benefits:(policy.benefits || []).filter(b => !/免付保費|豁免保費|waiver\s+of\s+premium/i.test(b.name || '')).map(b => ({ benefitType:b.name || '', amount:b.amount ?? '', limit:b.limit ?? '', currency:b.currency || '', primaryCategory:suggestedCategory(b.category), presentationTags:[], contractId:'', insuredPersonId:'', unit:'', benefitForm:'', notes:b.notes || '', extractedCategory:b.category || '', confidence:b.confidence, payoutScenario:b.payoutScenario && typeof b.payoutScenario==='object' ? {...b.payoutScenario} : null, payoutReviewSignature:'' })), values, riders:(policy.riders || []).map(r => typeof r === 'string' ? r : r?.name || '').filter(Boolean), extractedNames:extracted ? { holder:policy.policyholder?.name || '', insured:(policy.insuredPeople || []).map(p => p.name).filter(Boolean) } : null, extractionWarnings:extracted ? [...(policy.missingFields || []), ...(policy.conflicts || []), ...(policy.warnings || []), ...(sum.length > 1 ? ['識別到多項保障額，請核對並自行輸入所需金額'] : [])] : [], overallConfidence:policy.overallConfidence };
 }
 export function renderPolicyEditor({ draft, people, onReview, onCancel, onBack, extracted, onRerender }) {
@@ -104,8 +115,9 @@ function renderAiPolicyEditor({draft,people,onReview,onCancel,onRerender}) {
   const valueOwner=node('div');select(valueOwner,'保單價值所屬受保人',draft,'valuePersonId',choices);valueOwner.addEventListener('change',()=>{for(const v of draft.values) if(policyValueLabels.some(([t])=>t===v.valueType)) v.insuredPersonId=draft.valuePersonId;updateTotal();});card.append(valueOwner);
   for(const [type,label] of policyValueLabels){let v=draft.values.find(x=>x.valueType===type);if(!v){v={valueType:type,amount:'',currency:'',valuationDate:'',insuredPersonId:draft.valuePersonId || '',verified:false};draft.values.push(v);}const row=node('div',null,'policy-form-grid');row.append(node('h4',label));field(row,'金額',v,'amount');field(row,'貨幣',v,'currency');const details=section(row,'估值資料');field(details,'估值日期（YYYY-MM-DD）',v,'valuationDate');field(details,'適用條件',v,'conditions');const labelNode=node('label'),check=node('input');check.type='checkbox';check.checked=v.verified===true;check.addEventListener('change',()=>{v.verified=check.checked;updateTotal();});labelNode.append(check,document.createTextNode(' 已核對'));details.append(labelNode);row.addEventListener('input',event=>{if(event.target!==check){v.verified=false;check.checked=false;}updateTotal();});card.append(row);}
   const total=node('p');function updateTotal(){const result=accumulatedValueTotal(draft.values);total.textContent=result.complete ? `四類累積價值合計：${result.currency} ${result.total.toLocaleString()}（算術合計）` : '四類累積價值合計：資料未齊或條件不相符';}card.append(total);updateTotal();
-  const other=draft.values.filter(v=>!policyValueLabels.some(([type])=>type===v.valueType));
-  if(other.length){const extra=section(card,'原有及其他文件價值');for(const v of other){const row=node('div',null,'policy-form-grid');row.append(node('h4',v.valueType));select(row,'受保人',v,'insuredPersonId',choices);field(row,'金額',v,'amount');field(row,'貨幣',v,'currency');field(row,'保單年／年齡',v,'yearOrAge');field(row,'估值日期',v,'valuationDate');extra.append(row);}}
+  const primaryValues=new Set(policyValueLabels.map(([type])=>draft.values.find(v=>v.valueType===type)).filter(Boolean));
+  const other=draft.values.filter(v=>!primaryValues.has(v));
+  if(other.length){const extra=section(card,'原有及其他文件價值');for(const v of other){const row=node('div',null,'policy-form-grid');row.append(node('h4',v.sourceType ? `${v.sourceType}（原文件資料）` : v.valueType));select(row,'受保人',v,'insuredPersonId',choices);field(row,'金額',v,'amount');field(row,'貨幣',v,'currency');field(row,'保單年／年齡',v,'yearOrAge');field(row,'估值日期',v,'valuationDate');extra.append(row);}}
   values.append(card);root.append(values);
   const error=node('p','','blocked-note');error.setAttribute('role','alert');root.append(error);const actions=node('div',null,'policy-actions');actions.append(button('取消',onCancel),button('核對資料',()=>onReview(draft,error)));root.append(actions);return root;
 }
