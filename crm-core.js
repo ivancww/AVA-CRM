@@ -263,7 +263,7 @@ export function groupPolicyValues(values, policies, personId) {
 // A comparison must explicitly identify every reviewed benefit and its evidence.
 export function crossPolicyScenario(benefits, personId, category, comparison) {
   const rows=categoryBenefits((benefits || []).filter(b=>b.insuredPersonId===personId),category);
-  if (!personId || rows.length<2 || new Set(rows.map(b=>b.policyId)).size<2 || rows.some(b=>!b.policyId || !b.id)) return {total:null,reason:'incomplete_policies'};
+  if (!personId || rows.length<2 || rows.some(b=>!b.policyId || !b.id)) return {total:null,reason:'incomplete_policies'};
   if (!comparison || comparison.reviewed !== true || comparison.insuredPersonId!==personId || !comparison.event || !comparison.event.definition || !comparison.event.criteria || !comparison.event.date || !comparison.event.currency) return {total:null,reason:'unverified_event'};
   const proofs=Array.isArray(comparison.proofs) ? comparison.proofs : [];
   if (proofs.length!==rows.length || new Set(proofs.map(p=>p.benefitId)).size!==rows.length) return {total:null,reason:'incomplete_evidence'};
