@@ -82,9 +82,15 @@ export function normalizeExtractionResult(value) {
   };
 }
 
+export function sourceProductName(row) {
+  const name = typeof row?.name === 'string' ? row.name.trim() : '';
+  const code = typeof row?.planCode === 'string' ? row.planCode.trim() : '';
+  return name && (!code || name.normalize('NFKC').toLocaleLowerCase() !== code.normalize('NFKC').toLocaleLowerCase()) ? name : '';
+}
+
 export function resolvePolicyMatches(documentResult, registryProducts, resolver) {
   if (typeof resolver !== 'function') throw new TypeError('A product resolver is required');
-  return normalizeExtractionResult(documentResult).policies.map((policy) => resolver(registryProducts, policy));
+  return normalizeExtractionResult(documentResult).policies.map((policy) => resolver(registryProducts, { ...policy, productName: Array.isArray(policy.premiumCoverageRows) && policy.premiumCoverageRows.length ? sourceProductName(policy.premiumCoverageRows[0]) : policy.productName }));
 }
 
 function responseError(payload, status) {

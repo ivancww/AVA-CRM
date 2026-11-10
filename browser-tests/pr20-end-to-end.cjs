@@ -1,0 +1,53 @@
+const http = require('node:http');
+const fs = require('node:fs');
+const path = require('node:path');
+const assert = require('node:assert/strict');
+const { chromium } = require('playwright');
+const root = process.cwd();
+const server = http.createServer((req, res) => {
+  const file = path.resolve(root, '.' + new URL(req.url, 'http://local').pathname.replace(/^\/$/, '/index.html'));
+  if (!file.startsWith(root + path.sep)) return res.writeHead(403).end();
+  fs.readFile(file, (err, body) => { res.writeHead(err ? 404 : 200, { 'Content-Type': file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : file.endsWith('.json') ? 'application/json' : 'text/html' }); res.end(err ? '' : body); });
+});
+const fixture = { policies: [{ insurer:'Example Insurer', productName:'Incorrect Combined Name', policyNumber:'ANON-1', policyholder:{name:'MR EXAMPLE HOLDER'}, premium:{amount:785.60,currency:'USD',frequency:'annual'}, premiumLevy:{amount:1.20,currency:'USD'}, insuredPeople:[{name:'MS EXAMPLE ALPHA FULL'}, {name:'MR EXAMPLE BETA FULL'}], premiumCoverageRows:[{name:'愛伴航',planCode:'CODE-A',premium:223.60,premiumCurrency:'USD',effectiveDate:'2023-11-07',paidUpDate:'2041-11-07'}, {name:'Medical rider',planCode:'CODE-M',premium:562,premiumCurrency:'USD'}, {name:'升級保障（首十年）',planCode:'CODE-B',premium:0,premiumCurrency:'USD',effectiveDate:'2023-11-07',paidUpDate:'2033-11-07'}, {name:'豁免保費',planCode:'CODE-C',premium:0,premiumCurrency:'USD'}] }, {insurer:'Example Insurer', productName:'Other Combined', policyNumber:'ANON-2', premiumCoverageRows:[{name:'Independent Plan'}, {name:'Independent Rider',premium:5}]}] };
+(async()=>{
+  await new Promise(resolve=>server.listen(8772,'127.0.0.1',resolve));
+  const browser=await chromium.launch({executablePath:process.env.CRM_CHROMIUM_PATH,args:['--no-sandbox','--no-proxy-server'],headless:true});
+  try {
+    const page=await browser.newPage({viewport:{width:1180,height:820}});
+    await page.addInitScript(()=>{Object.defineProperty(window,'showSaveFilePicker',{value:undefined,configurable:true}); Object.defineProperty(navigator,'share',{value:undefined,configurable:true});});
+    const errors=[]; page.on('pageerror',e=>errors.push(e.message));
+    await page.route('https://script.google.com/**',route=>route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({success:true,data:fixture})}));
+    await page.goto('http://127.0.0.1:8772/index.html');
+    await page.evaluate(async()=>{const c=await import('/crm-core.js');const db=await c.openUserDatabase();await c.saveLocal(db,'households',{id:'h',displayName:'Fixture Family',searchName:'fixture family'});await c.saveLocal(db,'people',{id:'holder',householdId:'h',name:'Holder',relationship:'本人'});await c.saveLocal(db,'people',{id:'alpha',householdId:'h',name:'Alpha Display',relationship:'家人'});db.close();});
+    await page.reload();await page.locator('#customerSearch').fill('fixture');await page.locator('#customerSelect').selectOption('h');await page.locator('#aiPolicyBtn').click();await page.locator('#policyFile').setInputFiles({name:'fixture.pdf',mimeType:'application/pdf',buffer:Buffer.from('fixture')});
+    await page.getByText('步驟 1：確認產品保障分類').waitFor();
+    assert.deepEqual(await page.locator('.ai-policy-nav button').allTextContents().then(a=>a.map(x=>x.split(' · ')[0])),['1. 愛伴航','2. Independent Plan']);
+    assert.equal(await page.getByText('豁免保費',{exact:true}).count(),0);
+    await page.getByRole('button',{name:'確認分類並核對保單'}).click();
+    assert(await page.getByText('MS EXAMPLE ALPHA FULL',{exact:false}).count());assert(await page.getByText('MR EXAMPLE BETA FULL',{exact:false}).count());
+    await page.locator('[name=policyHolderId]').selectOption('holder');
+    await page.getByLabel('原文件受保人：MS EXAMPLE ALPHA FULL · 關聯 CRM 人物').selectOption('alpha');
+    await page.getByRole('button',{name:'＋ 新增受保人'}).click();
+    const newPerson=page.locator('.policy-editor > section').first().locator('.policy-repeat').last();
+    assert.equal(await newPerson.locator('[name=name]').inputValue(),'MR EXAMPLE BETA FULL');await newPerson.locator('[name=relationship]').fill('家人');await newPerson.getByRole('button',{name:'更新人物選項'}).click();
+    assert.equal(await page.locator('[name=productName]').inputValue(),'愛伴航');assert.equal(await page.locator('[name=premium]').first().inputValue(),'785.6');assert.equal(await page.locator('[name=mainPremium]').inputValue(),'223.6');assert.equal(await page.locator('[name=mainPremiumCurrency]').inputValue(),'USD');assert.equal(await page.locator('[name=premiumLevy]').inputValue(),'1.2');await page.getByText('Medical rider',{exact:true}).last().click();assert.equal(await page.locator('details').filter({hasText:'Medical rider'}).locator('[name=premium]').inputValue(),'562');assert.equal(await page.locator('details').filter({hasText:'Medical rider'}).locator('[name=premiumCurrency]').inputValue(),'USD');assert.equal(await page.getByText('CODE-A').count(),0);
+    assert.equal(await page.locator('[name=paymentTerm]').first().inputValue(),'18年');await page.getByText('升級保障（首十年）').last().click();const rider=page.locator('details').filter({hasText:'升級保障（首十年）'});assert.equal(await rider.locator('[name=paymentTerm]').inputValue(),'10年');
+    await page.getByRole('button',{name:'核對資料'}).click();await page.getByRole('heading',{name:'確認保單資料'}).waitFor();assert(await page.getByText('MS EXAMPLE ALPHA FULL',{exact:false}).count());assert(await page.getByText('MR EXAMPLE BETA FULL',{exact:false}).count());assert.equal(await page.getByText('Incorrect Combined Name').count(),0);const review=await page.locator('#modalBody').innerText();for(const value of ['保單總保費','785.6','主險保費','223.6','562','保費徵費（另計）','1.2','USD']) assert(review.includes(value),value);await page.getByRole('button',{name:'確認資料並加入 CRM'}).click();await page.getByText('保單已保存').waitFor();
+    const before=await page.evaluate(async()=>{const c=await import('/crm-core.js');const db=await c.openUserDatabase();const b=await c.exportUserLayer(db);db.close();return b;});
+    assert.equal(before.data.policies.length,1);assert.equal(before.data.policies[0].productName,'愛伴航');assert.equal(before.data.policyRoles.find(r=>r.insuredPersonId==='alpha').sourceInsuredName,'MS EXAMPLE ALPHA FULL');const beta=before.data.people.find(p=>p.name==='MR EXAMPLE BETA FULL');assert(beta);assert.equal(before.data.policyRoles.find(r=>r.insuredPersonId===beta.id).sourceInsuredName,'MR EXAMPLE BETA FULL');assert.deepEqual(before.data.policies[0].contracts.map(c=>c.name),['Medical rider','升級保障（首十年）','豁免保費']);
+    assert.equal(before.data.policies[0].premium,785.6);assert.equal(before.data.policies[0].mainPremium,223.6);assert.equal(before.data.policies[0].mainPremiumCurrency,'USD');assert.equal(before.data.policies[0].premiumLevy,1.2);assert.equal(before.data.policies[0].premiumLevyCurrency,'USD');assert.deepEqual(before.data.policies[0].premiumCoverageRows.map(r=>r.premiumCurrency),['USD','USD','USD','USD']);assert.deepEqual(before.data.policies[0].contracts.map(r=>[r.premium,r.premiumCurrency]),[[562,'USD'],[0,'USD'],[0,'USD']]);
+    await page.reload();
+    await page.locator('#customerSearch').fill('fixture');await page.locator('#customerSelect').selectOption('h');await page.locator('#insuredSelect').selectOption('alpha');await page.locator('#startReviewBtn').click();await page.locator('.perception-option').first().click();await page.locator('[data-step=coverage] .session-next').click();await page.locator('[data-step=resources] .session-next').click();await page.locator('.retirement-choice').first().click();await page.locator('[data-step=reservoirs] .session-next').click();await page.getByText('Level 2 · Review · 每份來源與重點').click();assert.equal(await page.locator('#annualPremiumSummary').textContent(),'每年保費（不包括徵費）：USD 785.60');await page.reload();
+    const [download]=await Promise.all([page.waitForEvent('download'),page.locator('#backupDataBtn').click()]);
+    const downloaded=JSON.parse(await fs.promises.readFile(await download.path(),'utf8'));
+    assert.deepEqual(downloaded.data.policyRoles,before.data.policyRoles);
+    await page.locator('#modalClose').click();
+    page.once('dialog',dialog=>dialog.accept());
+    const [chooser]=await Promise.all([page.waitForEvent('filechooser'),page.locator('#restoreDataBtn').click()]);
+    await chooser.setFiles({name:'backup.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(downloaded))});
+    await page.getByText('資料檔恢復完成').waitFor();
+    const after=await page.evaluate(async()=>{const c=await import('/crm-core.js');const db=await c.openUserDatabase();const out=await c.exportUserLayer(db);db.close();return out.data;});assert.deepEqual(after.policyRoles,before.data.policyRoles);assert.deepEqual(after.policies,before.data.policies);assert(!JSON.stringify(before).includes('fixture.pdf'));assert.deepEqual(errors,[]);
+    console.log('PR20 multi-person AI review, save, reload and restore passed');
+  } finally { await browser.close(); await new Promise(resolve=>server.close(resolve)); }
+})().catch(e=>{console.error(e);server.close();process.exitCode=1;});

@@ -6,6 +6,9 @@ export const INTAKE_STEPS = ['Upload', 'Document Understanding', 'Policy Groupin
 export const POLICY_COMPARE_FIELDS = ['insurer', 'productName', 'productVersion', 'policyNumber', 'coverageTerm', 'premium', 'paymentTerm', 'paymentFrequency', 'currency', 'status', 'issueDate', 'effectiveDate', 'sumAssured', 'sumAssuredCurrency', 'benefits'];
 
 export function normalizeSearchName(value = '') { return String(value).normalize('NFKC').trim().toLocaleLowerCase(); }
+export function normalizePersonName(value='') { return normalizeSearchName(value).replace(/^(?:(?:ms|mrs|mr|miss|dr)\.?\s+)+/i,'').replace(/[.,]/g,' ').replace(/\s+/g,' ').trim(); }
+export function paymentYears(start,end) { if(!/^\d{4}-\d{2}-\d{2}$/.test(start||'') || !/^\d{4}-\d{2}-\d{2}$/.test(end||''))return null;const a=new Date(start+'T00:00:00Z'),b=new Date(end+'T00:00:00Z');if(!Number.isFinite(+a)||!Number.isFinite(+b)||a.toISOString().slice(0,10)!==start||b.toISOString().slice(0,10)!==end||end.slice(5)!==start.slice(5)||b<=a)return null;return b.getUTCFullYear()-a.getUTCFullYear(); }
+export function paymentTermValue(start, end, fallback = '') { const years = paymentYears(start, end); if (years !== null) return `${years}年`; const text = String(fallback ?? '').trim(); return /^(?:annual|annually|yearly|每年|年繳|一年一繳)$/i.test(text) ? '' : text; }
 export function createBenefit(input = {}) { return { id: input.id || crypto.randomUUID(), policyId: input.policyId || '', insuredPersonId: input.insuredPersonId || '', primaryCategory: input.primaryCategory || 'medical', benefitCategory: input.benefitCategory || input.primaryCategory || 'medical', presentationTags: input.presentationTags || [], benefitType: input.benefitType || '', amount: input.amount ?? null, limit: input.limit ?? null, currency: input.currency || '', unit: input.unit || '', benefitForm: input.benefitForm || '', metadata: input.metadata || {}, createdAt: input.createdAt || new Date().toISOString() }; }
 export function dedupeBenefits(benefits) { const unique = new Map(); for (const benefit of benefits) unique.set(benefit.id, benefit); return [...unique.values()]; }
 export function benefitAppearsInCategory(benefit, category) { return benefit.primaryCategory === category || (benefit.presentationTags || []).includes(category) || benefit.benefitCategory === category; }
@@ -112,18 +115,22 @@ export function preparePolicyGroup(input, makeId = () => crypto.randomUUID()) {
   if (premium !== null && (!currency || !frequency)) throw new Error('保費需要填寫貨幣及繳費頻率');
   const id = makeId(), now = new Date().toISOString();
   const policy = { id, householdId, policyHolderId: holder, insurer, productName, productVersion: text(input.productVersion), policyNumber,
-    status: text(input.status), issueDate: date(input.issueDate, '簽發日期'), effectiveDate: date(input.effectiveDate, '生效日期'),
+    status: text(input.status), issueDate: date(input.issueDate, '簽發日期'), effectiveDate: date(input.effectiveDate, '生效日期'), paidUpDate: date(input.paidUpDate, '繳清日期'),
     premium, currency, paymentFrequency: frequency,
-    paymentTerm: text(input.paymentTerm), coverageTerm: text(input.coverageTerm), sumAssured: amount(input.sumAssured, '保障額'), sumAssuredCurrency: text(input.sumAssuredCurrency).toUpperCase(),
-    protectionScope: text(input.protectionScope), sourceSumAssured:(input.sourceSumAssured || []).map(item=>({name:text(item.name),amount:amount(item.amount,'文件保障額'),currency:text(item.currency).toUpperCase()})),
+    mainPremium: amount(input.mainPremium, '主險保費'), mainPremiumCurrency: text(input.mainPremiumCurrency).toUpperCase(),
+    premiumLevy: amount(input.premiumLevy, '保費徵費'), premiumLevyCurrency: text(input.premiumLevyCurrency).toUpperCase(),
+    paymentTerm: paymentTermValue(input.effectiveDate, input.paidUpDate, input.paymentTerm), coverageTerm: text(input.coverageTerm), sumAssured: amount(input.sumAssured, '保障額'), sumAssuredCurrency: text(input.sumAssuredCurrency).toUpperCase(),
+    premiumCoverageRows: (input.premiumCoverageRows || []).map(r => ({name:text(r.name), planCode:text(r.planCode), premium:amount(r.premium,'文件保費'), premiumCurrency:text(r.premiumCurrency).toUpperCase(), effectiveDate:text(r.effectiveDate), paidUpDate:text(r.paidUpDate), insuredName:text(r.insuredName), category:text(r.category)})), sourcePolicyholderName:text(input.extractedNames?.holder), sourceInsuredNames:(input.extractedNames?.insured || []).map(text).filter(Boolean), protectionScope: text(input.protectionScope), sourceSumAssured:(input.sourceSumAssured || []).map(item=>({name:text(item.name),amount:amount(item.amount,'文件保障額'),currency:text(item.currency).toUpperCase()})),
     officialProductInfo: input.officialProduct?.status === 'exact' ? { source:'Official 產品資料', entries:(input.officialProduct.entries || []).map(e=>({category:text(e.category), feature:text(e.feature), explanation:text(e.explanation), version:text(e.version), status:text(e.status)})) } : null,
     riders: (input.riders || []).map(text).filter(Boolean),
     contracts: (input.contracts || []).map((c, index) => {
       const personId = text(c.insuredPersonId);
       if (personId && !insured.includes(personId)) throw new Error('附加契約受保人不屬於此保單');
-      return { contractId: text(c.contractId) || `rider-${index+1}`, name: text(c.name), insuredPersonId: personId, category: text(c.category), premium: amount(c.premium,'附加契約保費'), premiumCurrency: text(c.premiumCurrency).toUpperCase(), paymentFrequency: text(c.paymentFrequency), sumAssured: amount(c.sumAssured,'附加契約保障額'), currency: text(c.currency).toUpperCase(), effectiveDate: date(c.effectiveDate,'附加契約生效日期'), paidUpDate: date(c.paidUpDate,'附加契約繳清日期'), paymentTerm: text(c.paymentTerm), coverageTerm: text(c.coverageTerm), protectionScope: text(c.protectionScope), annualDeductible: text(c.annualDeductible), annualLimit: text(c.annualLimit), lifetimeLimit: text(c.lifetimeLimit), limitsVerified: c.limitsVerified === true, source: text(c.source) };
+      return { contractId: text(c.contractId) || `rider-${index+1}`, name: text(c.name), insuredPersonId: personId, category: text(c.category), premium: amount(c.premium,'附加契約保費'), premiumCurrency: text(c.premiumCurrency).toUpperCase(), paymentFrequency: text(c.paymentFrequency), sumAssured: amount(c.sumAssured,'附加契約保障額'), currency: text(c.currency).toUpperCase(), effectiveDate: date(c.effectiveDate,'附加契約生效日期'), paidUpDate: date(c.paidUpDate,'附加契約繳清日期'), paymentTerm: paymentTermValue(c.effectiveDate, c.paidUpDate, c.paymentTerm), coverageTerm: text(c.coverageTerm), protectionScope: text(c.protectionScope), annualDeductible: text(c.annualDeductible), annualLimit: text(c.annualLimit), lifetimeLimit: text(c.lifetimeLimit), limitsVerified: c.limitsVerified === true, source: text(c.source) };
     }), hiddenContractualData: Array.isArray(input.hiddenContractualData) ? input.hiddenContractualData.map(b => ({ name:text(b.name), category:text(b.category), notes:text(b.notes), amount:amount(b.amount,'保障金額'), currency:text(b.currency), limit:text(b.limit) })) : [], createdAt: now };
-  const roles = insured.map((personId) => ({ id: makeId(), policyId: id, personId, policyHolderId: holder, insuredPersonId: personId, createdAt: now }));
+  const links = Object.values(input.sourceInsuredLinks || {}).filter(Boolean);
+  if ((input.extractedNames?.insured?.length && (input.extractedNames.insured.length > 1 || insured.length > 1) && links.length !== input.extractedNames.insured.length) || links.some(id => !insured.includes(id)) || new Set(links).size !== links.length) throw new Error('請核對原文件受保人與家庭人物的關聯');
+  const roles = insured.map((personId) => ({ id: makeId(), policyId: id, personId, policyHolderId: holder, insuredPersonId: personId, sourceInsuredName: text((input.extractedNames?.insured || []).find((name,index)=>input.sourceInsuredLinks?.[index]===personId) || (insured.length===1 && input.extractedNames?.insured?.length===1 ? input.extractedNames.insured[0] : '') || (input.newPeople || []).find(p=>p.id===personId)?.sourceName), sourcePolicyholderName:text(input.extractedNames?.holder), createdAt: now }));
   const benefits = (input.benefits || []).map((b) => {
     const personId = text(b.insuredPersonId), category = text(b.primaryCategory), type = text(b.benefitType);
     if (!insured.includes(personId) || !category || !type) throw new Error('保障項目需要指定被保人、分類及名稱');
@@ -143,6 +150,19 @@ export function preparePolicyGroup(input, makeId = () => crypto.randomUUID()) {
   if (newPeople.some((person) => !person.id || !person.name || !person.relationship || !insured.includes(person.id))) throw new Error('新增受保人資料不完整');
   if (new Set(newPeople.map((person) => person.id)).size !== newPeople.length) throw new Error('新增受保人重複');
   return { policy, roles, benefits, values, newPeople, personIds: [...new Set([holder, ...insured])] };
+}
+
+// Only the policy-level total contributes; contract premiums are components of it.
+export function annualPremiumSummary(policies = []) {
+  const factors = {annual:1, yearly:1, '年繳':1, '每年':1, monthly:12, '月繳':12, '每月':12, quarterly:4, '季繳':4, semiannual:2, '半年繳':2};
+  const totals = new Map(), seen = new Set(); let incomplete = false;
+  for (const p of policies) {
+    if (p.id && seen.has(p.id)) continue; if (p.id) seen.add(p.id);
+    const currency=String(p.currency || '').trim().toUpperCase(), frequency=String(p.paymentFrequency || '').trim().toLowerCase(), factor=Object.hasOwn(factors,frequency) ? factors[frequency] : null;
+    if (p.premium == null || String(p.premium).trim() === '' || !Number.isFinite(Number(p.premium)) || Number(p.premium)<0 || !currency || !factor) {incomplete=true;continue;}
+    totals.set(currency, (totals.get(currency) || 0) + Number(p.premium) * factor);
+  }
+  return {totals:[...totals].map(([currency,total])=>({currency,total:Math.round((total+Number.EPSILON)*100)/100})),incomplete};
 }
 
 export function policyDuplicateKey(policy) {
