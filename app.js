@@ -3,7 +3,7 @@ import { makePolicyDraft, renderPolicyEditor } from './policy-editor.js';
 import { registerAppShellUpdate } from './app-shell.js';
 import { CRM_CAPABILITIES, canEditFrontstage, resolveAvaEntry, returnToAvaUrl } from './ava-entry.js';
 import { initializeAdmin } from './admin-ui.js';
-import { DOCUMENT_ACCEPT, MAX_DOCUMENT_BYTES, attachDocumentPicker, clientExtractionErrorMessage, extractPolicyDocumentFromFile, resolvePolicyMatches } from './policy-extraction.js';
+import { sourceProductName, DOCUMENT_ACCEPT, MAX_DOCUMENT_BYTES, attachDocumentPicker, clientExtractionErrorMessage, extractPolicyDocumentFromFile, resolvePolicyMatches } from './policy-extraction.js';
 
 const $ = (id) => document.getElementById(id); const modal = $('modal');
 let policyPickerCleanup = null;
@@ -41,13 +41,13 @@ function closeExtractionTest() { if (policySaving) return; policyUiEpoch++; acti
 function maskPolicyNumber(value) { const text = String(value || '').trim(); return text ? (text.length <= 4 ? '••••' : `${text.slice(0, 2)}••••${text.slice(-2)}`) : '待確認'; }
 function productMatchLabel(match) { return match?.status === 'exact' ? 'exact' : match?.status === 'candidate' ? 'candidate · 需 Agent 確認' : 'none'; }
 function policyDetailContent(root, policy, productMatch) {
-  addExtractionSection(root, '保單身份', [['保險公司', policy.insurer], ['產品名稱', policy.productName], ['產品版本', policy.productVersion], ['保單號碼', policy.policyNumber], ['保單狀態', policy.policyStatus], ['簽發日期', policy.issueDate], ['生效日期', policy.effectiveDate]]);
+  addExtractionSection(root, '保單身份', [['保險公司', policy.insurer], ['產品名稱', policy.premiumCoverageRows?.length ? sourceProductName(policy.premiumCoverageRows[0]) : policy.productName], ['產品版本', policy.productVersion], ['保單號碼', policy.policyNumber], ['保單狀態', policy.policyStatus], ['簽發日期', policy.issueDate], ['生效日期', policy.effectiveDate]]);
   addExtractionSection(root, '持有人及被保人', [['保單持有人', policy.policyholder?.name], ['持有人信心', extractionConfidence(policy.policyholder?.confidence)], ['被保人', (policy.insuredPeople || []).map((person) => `${person.name || '待確認'}${person.relationship ? ` · ${person.relationship}` : ''}`)], ['整體信心', extractionConfidence(policy.overallConfidence)]]);
   addExtractionSection(root, '保費及期限', [['保費', policy.premium?.amount], ['貨幣', policy.premium?.currency], ['繳費頻率', policy.premium?.frequency], ['保費信心', extractionConfidence(policy.premium?.confidence)], ['繳費年期', policy.paymentTerm], ['保障年期', policy.coverageTerm]]);
   addExtractionSection(root, '保障額', (policy.sumAssured || []).length ? policy.sumAssured.map((item, index) => [`保障額 ${index + 1}`, `${extractionValue(item.name)} · ${extractionValue(item.amount)} ${extractionValue(item.currency)}`]) : [['保障額', '未有資料']]);
   addExtractionSection(root, 'Benefits', (policy.benefits || []).length ? policy.benefits.map((benefit, index) => [`Benefit ${index + 1}`, `${extractionValue(benefit.name)} · ${extractionValue(benefit.category)} · ${extractionValue(benefit.amount)} ${extractionValue(benefit.currency)}${benefit.limit ? ` · ${extractionValue(benefit.limit)}` : ''}${benefit.notes ? ` · ${extractionValue(benefit.notes)}` : ''}`]) : [['Benefits', '未有資料']]);
   addExtractionSection(root, 'Cash Values', (policy.cashValues || []).length ? policy.cashValues.map((value, index) => [`Value ${index + 1}`, `${extractionValue(value.type)} · ${extractionValue(value.yearOrAge)} · 保證 ${extractionValue(value.guaranteed)} · 非保證 ${extractionValue(value.nonGuaranteed)} ${extractionValue(value.currency)}`]) : [['Cash Values', '未有資料']]);
-  addExtractionList(root, 'Riders / Key Dates', [...(policy.riders || []), ...(policy.keyDates || [])]);
+  addExtractionList(root, 'Riders / Key Dates', [...(policy.premiumCoverageRows?.length ? policy.premiumCoverageRows.slice(1).filter(row => !(/免付保費|豁免保費|waiver\s+of\s+premium/i.test(row.name || '') && row.premium === 0)).map(sourceProductName).filter(Boolean) : (policy.riders || [])), ...(policy.keyDates || [])]);
   const matchRows = [['狀態', productMatchLabel(productMatch)], ['匹配來源', state.officialSource]];
   if (productMatch?.status === 'exact') matchRows.push(['已匹配 Official product', `${productMatch.product.insurer || ''} · ${productMatch.product.productName || ''} · ${productMatch.product.productVersion || ''}`]);
   if (productMatch?.status === 'candidate') matchRows.push(['候選產品', (productMatch.candidates || []).map((item) => `${item.insurer || ''} · ${item.productName || ''} · ${item.productVersion || ''}`)]);
@@ -57,7 +57,7 @@ function policyDetailContent(root, policy, productMatch) {
 function policySummaryCard(policy, productMatch, index, showDetails) {
   const card = document.createElement('article'); card.className = 'extraction-policy-card';
   const heading = document.createElement('h3'); heading.textContent = `保單 ${index + 1}`; card.append(heading);
-  addExtractionSection(card, '摘要', [['保險公司', policy.insurer], ['產品名稱', policy.productName], ['保單號碼', maskPolicyNumber(policy.policyNumber)], ['識別受保人數', (policy.insuredPeople || []).length], ['被保人', (policy.insuredPeople || []).map((person) => person.name || '待確認')], ['保費', policy.premium?.amount], ['整體信心', extractionConfidence(policy.overallConfidence)], ['Product Registry', productMatchLabel(productMatch)]]);
+  addExtractionSection(card, '摘要', [['保險公司', policy.insurer], ['產品名稱', policy.premiumCoverageRows?.length ? sourceProductName(policy.premiumCoverageRows[0]) : policy.productName], ['保單號碼', maskPolicyNumber(policy.policyNumber)], ['識別受保人數', (policy.insuredPeople || []).length], ['被保人', (policy.insuredPeople || []).map((person) => person.name || '待確認')], ['保費', policy.premium?.amount], ['整體信心', extractionConfidence(policy.overallConfidence)], ['Product Registry', productMatchLabel(productMatch)]]);
   if (showDetails) { const button = document.createElement('button'); button.type = 'button'; button.className = 'ava-button ava-button--secondary'; button.textContent = '查看資料'; button.onclick = showDetails; card.append(button); }
   return card;
 }

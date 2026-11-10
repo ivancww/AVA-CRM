@@ -12,3 +12,17 @@ test('ordered source rows and explicitly linked full names survive preparation',
   assert.equal(group.policy.sourcePolicyholderName,'MR HOLDER FULL'); assert.equal(group.policy.premiumCoverageRows[0].planCode,'A1');
   draft.sourceInsuredLinks={0:'one'}; assert.throws(()=>preparePolicyGroup(draft),/關聯/);
 });
+
+
+test('source product matching never promotes a plan code and uses the first source row', async () => {
+  const { sourceProductName, resolvePolicyMatches } = await import('../policy-extraction.js');
+  assert.equal(sourceProductName({name:'A-123', planCode:'a-123'}), '');
+  const policies = [{productName:'combined',premiumCoverageRows:[{name:'主險',planCode:'X'},{name:'附加',planCode:'Y'}]}];
+  assert.deepEqual(resolvePolicyMatches({policies}, [], (_,p)=>p.productName), ['主險']);
+  assert.equal(makePolicyDraft('h',{premiumCoverageRows:[{name:'CODE',planCode:'code'}]}).productName,'');
+});
+
+test('valid contract dates determine payment years independently of frequency and entered text', () => {
+  let n=0; const group=preparePolicyGroup({householdId:'h',policyHolderId:'holder',insuredPersonIds:['holder'],insurer:'A',productName:'Main',policyNumber:'P',effectiveDate:'2023-11-07',paidUpDate:'2041-11-07',paymentFrequency:'annual',paymentTerm:'annual',contracts:[{name:'Upgrade',effectiveDate:'2023-11-07',paidUpDate:'2033-11-07',paymentTerm:'20年'}]},()=>String(++n));
+  assert.equal(group.policy.paymentTerm,'18年');assert.equal(group.policy.paymentFrequency,'annual');assert.equal(group.policy.contracts[0].paymentTerm,'10年');
+});
