@@ -117,8 +117,10 @@ export function preparePolicyGroup(input, makeId = () => crypto.randomUUID()) {
   const policy = { id, householdId, policyHolderId: holder, insurer, productName, productVersion: text(input.productVersion), policyNumber,
     status: text(input.status), issueDate: date(input.issueDate, '簽發日期'), effectiveDate: date(input.effectiveDate, '生效日期'), paidUpDate: date(input.paidUpDate, '繳清日期'),
     premium, currency, paymentFrequency: frequency,
+    mainPremium: amount(input.mainPremium, '主險保費'), mainPremiumCurrency: text(input.mainPremiumCurrency).toUpperCase(),
+    premiumLevy: amount(input.premiumLevy, '保費徵費'), premiumLevyCurrency: text(input.premiumLevyCurrency).toUpperCase(),
     paymentTerm: paymentTermValue(input.effectiveDate, input.paidUpDate, input.paymentTerm), coverageTerm: text(input.coverageTerm), sumAssured: amount(input.sumAssured, '保障額'), sumAssuredCurrency: text(input.sumAssuredCurrency).toUpperCase(),
-    premiumCoverageRows: (input.premiumCoverageRows || []).map(r => ({name:text(r.name), planCode:text(r.planCode), premium:amount(r.premium,'文件保費'), effectiveDate:text(r.effectiveDate), paidUpDate:text(r.paidUpDate), insuredName:text(r.insuredName), category:text(r.category)})), sourcePolicyholderName:text(input.extractedNames?.holder), sourceInsuredNames:(input.extractedNames?.insured || []).map(text).filter(Boolean), protectionScope: text(input.protectionScope), sourceSumAssured:(input.sourceSumAssured || []).map(item=>({name:text(item.name),amount:amount(item.amount,'文件保障額'),currency:text(item.currency).toUpperCase()})),
+    premiumCoverageRows: (input.premiumCoverageRows || []).map(r => ({name:text(r.name), planCode:text(r.planCode), premium:amount(r.premium,'文件保費'), premiumCurrency:text(r.premiumCurrency).toUpperCase(), effectiveDate:text(r.effectiveDate), paidUpDate:text(r.paidUpDate), insuredName:text(r.insuredName), category:text(r.category)})), sourcePolicyholderName:text(input.extractedNames?.holder), sourceInsuredNames:(input.extractedNames?.insured || []).map(text).filter(Boolean), protectionScope: text(input.protectionScope), sourceSumAssured:(input.sourceSumAssured || []).map(item=>({name:text(item.name),amount:amount(item.amount,'文件保障額'),currency:text(item.currency).toUpperCase()})),
     officialProductInfo: input.officialProduct?.status === 'exact' ? { source:'Official 產品資料', entries:(input.officialProduct.entries || []).map(e=>({category:text(e.category), feature:text(e.feature), explanation:text(e.explanation), version:text(e.version), status:text(e.status)})) } : null,
     riders: (input.riders || []).map(text).filter(Boolean),
     contracts: (input.contracts || []).map((c, index) => {
@@ -148,6 +150,19 @@ export function preparePolicyGroup(input, makeId = () => crypto.randomUUID()) {
   if (newPeople.some((person) => !person.id || !person.name || !person.relationship || !insured.includes(person.id))) throw new Error('新增受保人資料不完整');
   if (new Set(newPeople.map((person) => person.id)).size !== newPeople.length) throw new Error('新增受保人重複');
   return { policy, roles, benefits, values, newPeople, personIds: [...new Set([holder, ...insured])] };
+}
+
+// Only the policy-level total contributes; contract premiums are components of it.
+export function annualPremiumSummary(policies = []) {
+  const factors = {annual:1, yearly:1, '年繳':1, '每年':1, monthly:12, '月繳':12, '每月':12, quarterly:4, '季繳':4, semiannual:2, '半年繳':2};
+  const totals = new Map(), seen = new Set(); let incomplete = false;
+  for (const p of policies) {
+    if (p.id && seen.has(p.id)) continue; if (p.id) seen.add(p.id);
+    const currency=String(p.currency || '').trim().toUpperCase(), frequency=String(p.paymentFrequency || '').trim().toLowerCase(), factor=Object.hasOwn(factors,frequency) ? factors[frequency] : null;
+    if (p.premium == null || String(p.premium).trim() === '' || !Number.isFinite(Number(p.premium)) || Number(p.premium)<0 || !currency || !factor) {incomplete=true;continue;}
+    totals.set(currency, (totals.get(currency) || 0) + Number(p.premium) * factor);
+  }
+  return {totals:[...totals].map(([currency,total])=>({currency,total:Math.round((total+Number.EPSILON)*100)/100})),incomplete};
 }
 
 export function policyDuplicateKey(policy) {
